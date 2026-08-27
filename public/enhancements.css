@@ -72,13 +72,15 @@ body::before {
 .brand b::before,.conjures-glow::before { top: -.65em; right: -.7em; }
 .brand b::after,.conjures-glow::after { content: "✦"; bottom: -.45em; left: -.75em; font-size: .34em; animation-delay: 1.15s; }
 
-.profile-card {
+.profile-card,
+.login-card {
   position: relative;
   isolation: isolate;
   border-color: transparent;
 }
 
-.profile-card::before {
+.profile-card::before,
+.login-card::before {
   content: "";
   position: absolute;
   z-index: -1;
@@ -97,6 +99,9 @@ body::before {
 
 .disabled { display: inline-flex; align-items: center; justify-content: center; text-align: center; min-height: 40px; }
 #add-section { margin-top: 14px; }
+.question-editor .row { margin-bottom: 10px; }
+.section-title + .section-desc { margin-top: 10px; }
+.q-options { margin-top: 10px; }
 
 @property --border-angle { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
 @keyframes border-orbit { to { --border-angle: 360deg; } }
