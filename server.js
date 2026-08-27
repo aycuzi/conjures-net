@@ -229,9 +229,9 @@ async function requireUser(req, res, next) {
   req.user = user;
   next();
 }
-async function applicationState(user) {
+async function applicationState(user, applicationId) {
   if (!user) return { state: null, daysRemaining: 0 };
-  const [blocked, past] = await Promise.all([api(`/tables/application_blacklists?roblox_user_id=${encodeURIComponent(user.roblox_user_id)}&limit=1`), api(`/tables/application_submissions?roblox_user_id=${encodeURIComponent(user.roblox_user_id)}&order=submitted_at.desc`)]);
+  const [blocked, past] = await Promise.all([api(`/tables/application_blacklists?roblox_user_id=${encodeURIComponent(user.roblox_user_id)}&limit=1`), api(`/tables/application_submissions?roblox_user_id=${encodeURIComponent(user.roblox_user_id)}&application_id=${encodeURIComponent(applicationId)}&order=submitted_at.desc`)]);
   if (blocked[0]) return { state: "blacklisted", daysRemaining: 0 };
   const stale = past.filter((x) => x.status === "pending" && !x.discord_message_id);
   for (const item of stale) await api(`/tables/application_submissions?id=${encodeURIComponent(item.id)}`, { method: "DELETE" });
@@ -281,20 +281,16 @@ app.get("/api/applications", async (req, res) => {
   try {
     await seed();
     const rawUser = await current(req),
-      user = rawUser && !rawUser.siteBlacklisted ? rawUser : null,
-      state = await applicationState(user);
+      user = rawUser && !rawUser.siteBlacklisted ? rawUser : null;
     const forms = await api("/tables/application_forms?order=created_at.asc");
+    const states = new Map(await Promise.all(forms.map(async (form) => [form.id, await applicationState(user, form.id)])));
     res.json(
       forms
         .filter((f) => f.is_open || (user && editorAllowed(f, user)))
-        .map((f) => ({
-          ...f,
-          schema: JSON.parse(f.schema_json || "[]"),
-          canEdit: Boolean(user && editorAllowed(f, user)),
-          applicationState: state.state,
-          daysRemaining: state.daysRemaining,
-          canApply: Boolean(user && f.is_open && applyAllowed(f, user) && !state.state),
-        })),
+        .map((f) => {
+          const state = states.get(f.id);
+          return { ...f, schema: JSON.parse(f.schema_json || "[]"), canEdit: Boolean(user && editorAllowed(f, user)), applicationState: state.state, daysRemaining: state.daysRemaining, canApply: Boolean(user && f.is_open && applyAllowed(f, user) && !state.state) };
+        }),
     );
   } catch (e) {
     console.error(e);
@@ -307,7 +303,7 @@ app.get("/api/applications/:id", async (req, res) => {
     const form = forms[0],
       rawUser = await current(req),
       user = rawUser && !rawUser.siteBlacklisted ? rawUser : null,
-      state = await applicationState(user);
+      state = await applicationState(user, req.params.id);
     if (!form || (!form.is_open && !user)) return res.status(404).json({ error: "Application not found." });
     res.json({
       ...form,
@@ -356,7 +352,7 @@ app.post("/api/applications/:id/submit", requireUser, async (req, res) => {
       form = forms[0];
     if (!form?.is_open) return res.status(409).json({ error: "This application is not open." });
     if (!applyAllowed(form, req.user)) return res.status(403).json({ error: "You are unable to apply." });
-    const state = await applicationState(req.user);
+    const state = await applicationState(req.user, req.params.id);
     if (state.state === "blacklisted") return res.status(403).json({ error: "You are blacklisted from submitting applications." });
     if (state.state === "pending") return res.status(409).json({ error: "You already have a pending application." });
     if (state.state === "denied")

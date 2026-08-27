@@ -3,7 +3,28 @@ const app = document.querySelector("#app"),
   account = document.querySelector("#account"),
   modal = document.querySelector("#modal");
 let me = null;
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+let permissionWatcher = null;
+const permissionFingerprint = (user) => JSON.stringify({ authenticated: Boolean(user?.authenticated), blocked: Boolean(user?.siteBlacklisted), rank: Number(user?.rank?.number || 0), roles: [...(user?.roles || [])].sort() });
+function watchPermissions() {
+  if (permissionWatcher || !me?.authenticated) return;
+  let fingerprint = permissionFingerprint(me);
+  permissionWatcher = setInterval(async () => {
+    try {
+      const latest = await request("/api/me");
+      const next = permissionFingerprint(latest);
+      if (next !== fingerprint) location.reload();
+      fingerprint = next;
+    } catch {}
+  }, 30000);
+}
+const esc = (s) =>
+  String(s ?? "").replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ],
+  );
 async function request(url, options = {}) {
   const r = await fetch(url, {
     headers: { "content-type": "application/json", ...(options.headers || {}) },
@@ -13,13 +34,26 @@ async function request(url, options = {}) {
   if (!r.ok) throw new Error(data.error || `Request failed (${r.status})`);
   return data;
 }
-const avatar = (u) => u.headshot || `https://www.roblox.com/headshot-thumbnail/image?userId=${u.roblox_user_id}&width=150&height=150&format=png`;
+const avatar = (u) =>
+  u.headshot ||
+  `https://www.roblox.com/headshot-thumbnail/image?userId=${u.roblox_user_id}&width=150&height=150&format=png`;
 function chrome() {
-  nav.innerHTML = me?.authenticated ? '<a href="/dashboard">Home</a><a href="/applications">Applications</a>' : '<a href="/">Login</a><a href="/applications">Applications</a>';
-  for (const a of nav.children) if (a.pathname === location.pathname) a.classList.add("active");
-  account.innerHTML = me?.authenticated ? `<div class="account"><img class="avatar" src="${avatar(me)}" alt=""><button class="logout" id="logout" type="button">Log Out</button></div>` : "";
+  nav.innerHTML = me?.authenticated
+    ? '<a href="/dashboard">Home</a><a href="/applications">Applications</a>'
+    : '<a href="/">Login</a><a href="/applications">Applications</a>';
+  for (const a of nav.children)
+    if (a.pathname === location.pathname) a.classList.add("active");
+  account.innerHTML = me?.authenticated
+    ? `<div class="account"><img class="avatar" src="${avatar(me)}" alt=""><button class="logout" id="logout" type="button">Log Out</button></div>`
+    : "";
   const logout = document.querySelector("#logout");
-  if (logout) logout.onclick = () => showModal("Log Out", "Are you sure you would like to log out?", async () => location.assign("/auth/logout"));
+  if (logout)
+    logout.onclick = () =>
+      showModal(
+        "Log Out",
+        "Are you sure you would like to log out?",
+        async () => location.assign("/auth/logout"),
+      );
 }
 function showModal(title, text, confirm) {
   modal.classList.remove("hidden");
@@ -40,10 +74,14 @@ function guardNavigation(isDirty, clearDirty) {
     link.onclick = (e) => {
       if (!isDirty()) return;
       e.preventDefault();
-      showModal("Discard Changes", "You have unsaved changes. Are you sure you would like to leave this page?", () => {
-        clearDirty();
-        location.assign(link.href);
-      });
+      showModal(
+        "Discard Changes",
+        "You have unsaved changes. Are you sure you would like to leave this page?",
+        () => {
+          clearDirty();
+          location.assign(link.href);
+        },
+      );
     };
   });
 }
@@ -53,7 +91,42 @@ async function login() {
 }
 async function dashboard() {
   if (!me.authenticated) return login();
-  app.innerHTML = `<section class="hero"><div class="eyebrow">Dashboard</div><h1>Welcome to <span class="conjures-glow">CONJURES</span></h1><p class="muted">Your central place for CONJURES applications and account access.</p></section><section class="profile-card"><img class="avatar" src="${avatar(me)}"><div><h1>${esc(me.roblox_username)}</h1><p>${esc(me.rank.name)}</p><p class="muted">Roblox ID: ${esc(me.roblox_user_id)} · Discord ID: ${esc(me.discord_id)}</p></div></section>`;
+  app.innerHTML = `<section class="hero"><div class="eyebrow">Dashboard</div><h1>Welcome to <span class="conjures-glow">CONJURES</span></h1><p class="muted">Your central place for CONJURES applications and account access.</p></section><section class="profile-card"><img class="avatar" src="${avatar(me)}"><div class="profile-details"><h1>${esc(me.roblox_username)}</h1><p>${esc(me.rank.name)}</p><p class="muted">Roblox ID: ${esc(me.roblox_user_id)} · Discord ID: ${esc(me.discord_id)}</p><div class="role-tags">${portalRoles(
+    me,
+  )
+    .map(
+      (role) =>
+        `<span class="profile-tag" style="--role:${role.color}">${esc(role.name)}</span>`,
+    )
+    .join("")}</div></div></section>`;
+}
+function portalRoles(user) {
+  const rank = Number(user.rank?.number || 0),
+    roles = new Set(user.roles || []),
+    result = [];
+  const add = (name, color, visible) => {
+    if (visible) result.push({ name, color });
+  };
+  add("SR Team", "#f15b78", rank >= 250);
+  add("Development Team", "#45d483", rank >= 60 && rank <= 69);
+  add("Hosting Lead", "#c4a2ff", roles.has("Hosting Lead"));
+  add("Moderation Lead", "#ff9fc3", roles.has("Moderation Lead"));
+  add("Relations Lead", "#b786ff", roles.has("Relations Lead"));
+  add(
+    "Relations Team",
+    "#a879ff",
+    (rank >= 40 && rank <= 49) || roles.has("Relations Lead"),
+  );
+  add("HR Team", "#ff7eb6", rank >= 50 && rank <= 59);
+  add("Hosting Team", "#f04747", rank >= 30 && rank <= 39);
+  add("Moderation Team", "#579dff", rank >= 20 && rank <= 29);
+  add("Events Lead", "#ffbd73", roles.has("Events Lead"));
+  add("Newsletter Lead", "#ffe98a", roles.has("Newsletter Lead"));
+  add("Social Media Lead", "#8ee8ad", roles.has("Social Media Lead"));
+  add("Events Team", "#ff9f43", roles.has("Events Team"));
+  add("Newsletter Team", "#f7d154", roles.has("Newsletter Team"));
+  add("Social Media Team", "#58d68d", roles.has("Social Media Team"));
+  return result;
 }
 async function applications() {
   const forms = await request("/api/applications");
@@ -61,15 +134,19 @@ async function applications() {
 }
 function inputFor(q, value = "") {
   if (q.locked) return `<input value="${esc(value)}" disabled>`;
-  if (q.type === "long") return `<textarea data-q="${q.id}" ${q.required ? "required" : ""}>${esc(value)}</textarea>`;
-  if (q.type === "multiple" || q.type === "checkboxes") return `<div class="choices">${(q.options || []).map((o) => `<label class="choice"><input data-q="${q.id}" type="${q.type === "multiple" ? "radio" : "checkbox"}" name="${q.id}" value="${esc(o)}"> ${esc(o)}</label>`).join("")}</div>`;
-  if (q.type === "dropdown") return `<select data-q="${q.id}"><option value="">Select an option</option>${(q.options || []).map((o) => `<option>${esc(o)}</option>`).join("")}</select>`;
+  if (q.type === "long")
+    return `<textarea data-q="${q.id}" ${q.required ? "required" : ""}>${esc(value)}</textarea>`;
+  if (q.type === "multiple" || q.type === "checkboxes")
+    return `<div class="choices">${(q.options || []).map((o) => `<label class="choice"><input data-q="${q.id}" type="${q.type === "multiple" ? "radio" : "checkbox"}" name="${q.id}" value="${esc(o)}"> ${esc(o)}</label>`).join("")}</div>`;
+  if (q.type === "dropdown")
+    return `<select data-q="${q.id}"><option value="">Select an option</option>${(q.options || []).map((o) => `<option>${esc(o)}</option>`).join("")}</select>`;
   return `<input data-q="${q.id}" value="${esc(value)}" ${q.required ? "required" : ""}>`;
 }
 async function applyPage(formId) {
   const f = await request(`/api/applications/${formId}`);
   if (!me.authenticated || !f.canApply) {
-    app.innerHTML = '<div class="success"><h1>You are unable to apply</h1><p class="muted">This application is unavailable for your account.</p></div>';
+    app.innerHTML =
+      '<div class="success"><h1>You are unable to apply</h1><p class="muted">This application is unavailable for your account.</p></div>';
     return;
   }
   let dirty = false;
@@ -80,28 +157,35 @@ async function applyPage(formId) {
     () => dirty,
     () => (dirty = false),
   );
-  window.onbeforeunload = () => (dirty ? "You have unsaved changes." : undefined);
+  window.onbeforeunload = () =>
+    dirty ? "You have unsaved changes." : undefined;
   form.onsubmit = (e) => {
     e.preventDefault();
-    showModal("Submit Application", "Are you sure you would like to submit this application? You cannot edit it after submission.", async () => {
-      const answers = {};
-      document.querySelectorAll("[data-q]").forEach((el) => {
-        if (el.type === "checkbox") {
-          if (el.checked) (answers[el.dataset.q] ??= []).push(el.value);
-        } else if (el.type !== "radio" || el.checked) answers[el.dataset.q] = el.value;
-      });
-      try {
-        await request(`/api/applications/${formId}/submit`, {
-          method: "POST",
-          body: JSON.stringify({ answers }),
+    showModal(
+      "Submit Application",
+      "Are you sure you would like to submit this application? You cannot edit it after submission.",
+      async () => {
+        const answers = {};
+        document.querySelectorAll("[data-q]").forEach((el) => {
+          if (el.type === "checkbox") {
+            if (el.checked) (answers[el.dataset.q] ??= []).push(el.value);
+          } else if (el.type !== "radio" || el.checked)
+            answers[el.dataset.q] = el.value;
         });
-        dirty = false;
-        window.onbeforeunload = null;
-        app.innerHTML = '<div class="success"><div class="check">✓</div><h1>Application submitted</h1><p>Your application has been successfully submitted. Please ensure you follow the guidelines of the application via the announcement. Best of luck!</p></div>';
-      } catch (err) {
-        showNotice("Application Not Submitted", err.message);
-      }
-    });
+        try {
+          await request(`/api/applications/${formId}/submit`, {
+            method: "POST",
+            body: JSON.stringify({ answers }),
+          });
+          dirty = false;
+          window.onbeforeunload = null;
+          app.innerHTML =
+            '<div class="success"><div class="check">✓</div><h1>Application submitted</h1><p>Your application has been successfully submitted. Please ensure you follow the guidelines of the application via the announcement. Best of luck!</p></div>';
+        } catch (err) {
+          showNotice("Application Not Submitted", err.message);
+        }
+      },
+    );
   };
 }
 const uid = () => crypto.randomUUID();
@@ -117,7 +201,7 @@ async function editPage(formId) {
     dirty = false,
     drag = null;
   const render = () => {
-    app.innerHTML = `<div class="form-shell"><div class="editor-toolbar"><button class="ghost" id="editor-back" type="button">Back</button><div class="actions"><button class="ghost" id="discard">Discard Changes</button><button class="primary" id="save">Save Changes</button></div></div><div class="form-title"><div class="eyebrow">Application editor</div><h1>${esc(f.name)}</h1><label>Description</label><textarea id="form-description">${esc(description)}</textarea><label class="switch"><input id="is-open" type="checkbox" ${isOpen ? "checked" : ""}> Open to public applications</label></div><div id="sections">${schema.map((s, si) => `<section class="section editor-section" data-si="${si}"><input class="section-title" value="${esc(s.title)}" ${s.locked ? "disabled" : ""}><textarea class="section-desc" placeholder="Optional section description" ${s.locked ? "disabled" : ""}>${esc(s.description || "")}</textarea>${(s.questions || []).map((q, qi) => editorQuestion(q, si, qi)).join("")}<div class="editor-controls">${s.locked ? "" : `<span class="drag section-drag" draggable="true">⋮⋮ Drag Section</span><button class="ghost tiny delete-section" type="button">Delete Section</button>`}<button class="ghost tiny add-question" type="button">+ Add Question</button></div></section>`).join("")}</div><button class="ghost" id="add-section">+ Add Section</button></div>`;
+    app.innerHTML = `<div class="form-shell"><div class="editor-toolbar"><button class="ghost" id="editor-back" type="button">Back</button><div class="actions"><button class="ghost" id="discard">Discard Changes</button><button class="primary" id="save">Save Changes</button></div></div><div class="form-title"><div class="eyebrow">Application editor</div><h1>${esc(f.name)}</h1><label>Description</label><textarea id="form-description">${esc(description)}</textarea><label class="switch"><input id="is-open" type="checkbox" ${isOpen ? "checked" : ""}> Open</label></div><div id="sections">${schema.map((s, si) => `<section class="section editor-section" data-si="${si}"><input class="section-title" value="${esc(s.title)}" ${s.locked ? "disabled" : ""}><textarea class="section-desc" placeholder="Optional section description" ${s.locked ? "disabled" : ""}>${esc(s.description || "")}</textarea>${(s.questions || []).map((q, qi) => editorQuestion(q, si, qi)).join("")}<div class="editor-controls">${s.locked ? "" : `<span class="drag section-drag" draggable="true">⋮⋮ Drag Section</span><button class="ghost tiny delete-section" type="button">Delete Section</button>`}<button class="ghost tiny add-question" type="button">+ Add Question</button></div></section>`).join("")}</div><button class="ghost" id="add-section">+ Add Section</button></div>`;
     bind();
   };
   function sync() {
@@ -145,7 +229,9 @@ async function editPage(formId) {
     dirty = true;
   }
   function bind() {
-    document.querySelectorAll("input,textarea,select").forEach((x) => (x.oninput = sync));
+    document
+      .querySelectorAll("input,textarea,select")
+      .forEach((x) => (x.oninput = sync));
     document.querySelectorAll(".add-question").forEach(
       (b, si) =>
         (b.onclick = () => {
@@ -251,18 +337,26 @@ async function editPage(formId) {
         location.assign("/applications");
         return;
       }
-      showModal("Discard Changes", "You have unsaved changes. Are you sure you would like to leave this page?", () => {
-        dirty = false;
-        location.assign("/applications");
-      });
+      showModal(
+        "Discard Changes",
+        "You have unsaved changes. Are you sure you would like to leave this page?",
+        () => {
+          dirty = false;
+          location.assign("/applications");
+        },
+      );
     };
     document.querySelector("#editor-back").onclick = leave;
     document.querySelector("#discard").onclick = () => {
       if (!dirty) return;
-      showModal("Discard Changes", "Are you sure you would like to discard your unsaved changes?", () => {
-        dirty = false;
-        location.reload();
-      });
+      showModal(
+        "Discard Changes",
+        "Are you sure you would like to discard your unsaved changes?",
+        () => {
+          dirty = false;
+          location.reload();
+        },
+      );
     };
     document.querySelector("#save").onclick = async () => {
       sync();
@@ -272,7 +366,10 @@ async function editPage(formId) {
           body: JSON.stringify({ description, isOpen, schema }),
         });
         dirty = false;
-        showNotice("Changes Saved", "Your application changes have been saved successfully.");
+        showNotice(
+          "Changes Saved",
+          "Your application changes have been saved successfully.",
+        );
       } catch (error) {
         showNotice("Changes Not Saved", error.message);
       }
@@ -281,7 +378,8 @@ async function editPage(formId) {
       () => dirty,
       () => (dirty = false),
     );
-    window.onbeforeunload = () => (dirty ? "You have unsaved changes." : undefined);
+    window.onbeforeunload = () =>
+      dirty ? "You have unsaved changes." : undefined;
   }
   render();
 }
@@ -291,11 +389,13 @@ function legal(type) {
 }
 async function route() {
   me = await request("/api/me");
+  watchPermissions();
   chrome();
   const p = location.pathname;
   try {
     if (me.siteBlacklisted) {
-      app.innerHTML = '<div class="success"><h1>Access Restricted</h1><p class="muted">You are blacklisted from accessing conjures.net.</p></div>';
+      app.innerHTML =
+        '<div class="success"><h1>Access Restricted</h1><p class="muted">You are blacklisted from accessing conjures.net.</p></div>';
       return;
     }
     if (p === "/") return me.authenticated ? dashboard() : login();
