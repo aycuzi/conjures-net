@@ -68,4 +68,5 @@ app.get('/auth/roblox/callback',async(req,res)=>{try{if(!readToken(req.query.sta
 app.get('/auth/logout',(_req,res)=>{res.setHeader('Set-Cookie','conjures_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0');res.redirect('/');});
 app.get(['/dashboard','/applications','/applications/:id','/applications/:id/edit','/terms','/privacy'],(_req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
-app.listen(process.env.PORT||3000,()=>console.log('[conjures-net] ready'));
+const port = Number(process.env.PORT || 3000);
+app.listen(port, "0.0.0.0", () => console.log(`[conjures-net] ready on ${port}`));
