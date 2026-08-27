@@ -31,7 +31,7 @@ app.use(express.static(path.join(__dirname, "public"), { extensions: ["html"] })
 const encode = (v) => Buffer.from(JSON.stringify(v)).toString("base64url");
 const sign = (v) => crypto.createHmac("sha256", process.env.SESSION_SECRET || "local-only").update(v).digest("base64url");
 const token = (v) => { const body=encode(v); return `${body}.${sign(body)}`; };
-function readToken(value) { try { const [body,sig]=String(value||"").split("."); const expected=sign(body); if(!sig||sig.length!==expected.length||!crypto.timingSafeEqual(Buffer.from(sig),Buffer.from(expected)))return null; const value=JSON.parse(Buffer.from(body,"base64url")); return value.exp>Date.now()?value:null; } catch{return null;} }
+function readToken(input) { try { const [body,sig]=String(input||"").split("."); const expected=sign(body); if(!sig||sig.length!==expected.length||!crypto.timingSafeEqual(Buffer.from(sig),Buffer.from(expected)))return null; const decoded=JSON.parse(Buffer.from(body,"base64url").toString("utf8")); return decoded.exp>Date.now()?decoded:null; } catch{return null;} }
 function cookies(req){return Object.fromEntries(String(req.headers.cookie||"").split(";").map(x=>x.trim().split(/=(.*)/s)).filter(x=>x[0]).map(([k,v])=>[k,decodeURIComponent(v||"")]));}
 function setSession(res,profile){res.setHeader("Set-Cookie",`conjures_session=${encodeURIComponent(token({...profile,exp:Date.now()+12*60*60*1000}))}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=43200`);}
 const pendingLoginTickets=new Map();
