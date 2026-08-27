@@ -7,72 +7,584 @@ const PUBLIC_URL = String(process.env.PUBLIC_URL || "http://localhost:3000").rep
 const API_URL = String(process.env.CONJURES_API_URL || "https://api.conjures.net").replace(/\/$/, "");
 const GUILD_ID = process.env.DISCORD_GUILD_ID || "1517112878862176256";
 const GROUP_ID = process.env.ROBLOX_GROUP_ID || "12287375";
-const apiHeaders = { "x-api-key": process.env.CONJURES_API_KEY || "", "content-type": "application/json" };
+const apiHeaders = {
+  "x-api-key": process.env.CONJURES_API_KEY || "",
+  "content-type": "application/json",
+};
 
 const FORMS = [
-  ["hr","HR Team Application","HR Application","HR TEAM","#ff7eb6","1542182045722214522",["1536743365272404049","1536743481114890360"]],
-  ["relations","Relations Board Application","Relations Board Application","RELATIONS TEAM","#a879ff","1542181718675562607",["1536743365272404049","1536743848955617280"]],
-  ["hosting","Hosting Team Application","Hosting Team Application","HOSTING TEAM","#f04747","1537701786767327302",["1536744173083037806"]],
-  ["moderation","Moderation Team Application","Moderation Team Application","MODERATION TEAM","#579dff","1537701754723110942",["1536744195023437834"]],
-  ["events","Events Team Application","Events Team Application","EVENTS TEAM","#ff9f43","1542181955578363985",["1536743365272404049","1536745884803661864"]],
-  ["newsletter","Newsletter Team Application","Newsletter Team Application","NEWSLETTER TEAM","#f7d154","1542181772291211386",["1536743365272404049","1536746008371920936"]],
-  ["social","Social Media Team Application","Social Media Team Application","SOCIAL MEDIA TEAM","#58d68d","1542181867451711588",["1536743365272404049","1536745953942315066"]],
+  ["hr", "HR Team Application", "HR Application", "HR TEAM", "#ff7eb6", "1542182045722214522", ["1536743365272404049", "1536743481114890360"]],
+  ["relations", "Relations Board Application", "Relations Board Application", "RELATIONS TEAM", "#a879ff", "1542181718675562607", ["1536743365272404049", "1536743848955617280"]],
+  ["hosting", "Hosting Team Application", "Hosting Team Application", "HOSTING TEAM", "#f04747", "1537701786767327302", ["1536744173083037806"]],
+  ["moderation", "Moderation Team Application", "Moderation Team Application", "MODERATION TEAM", "#579dff", "1537701754723110942", ["1536744195023437834"]],
+  ["events", "Events Team Application", "Events Team Application", "EVENTS TEAM", "#ff9f43", "1542181955578363985", ["1536743365272404049", "1536745884803661864"]],
+  ["newsletter", "Newsletter Team Application", "Newsletter Team Application", "NEWSLETTER TEAM", "#f7d154", "1542181772291211386", ["1536743365272404049", "1536746008371920936"]],
+  ["social", "Social Media Team Application", "Social Media Team Application", "SOCIAL MEDIA TEAM", "#58d68d", "1542181867451711588", ["1536743365272404049", "1536745953942315066"]],
 ];
-const LOCKED_SECTION = { id:"information", title:"Information", description:"Your verified account information.", locked:true, questions:[
-  {id:"roblox_username",title:"Roblox Username",type:"short",required:true,locked:true},
-  {id:"roblox_id",title:"Roblox ID",type:"short",required:true,locked:true},
-  {id:"discord_id",title:"Discord User ID",type:"short",required:true,locked:true},
-]};
+const LOCKED_SECTION = {
+  id: "information",
+  title: "Information",
+  description: "Your verified account information.",
+  locked: true,
+  questions: [
+    {
+      id: "roblox_username",
+      title: "Roblox Username",
+      type: "short",
+      required: true,
+      locked: true,
+    },
+    {
+      id: "roblox_id",
+      title: "Roblox ID",
+      type: "short",
+      required: true,
+      locked: true,
+    },
+    {
+      id: "discord_id",
+      title: "Discord User ID",
+      type: "short",
+      required: true,
+      locked: true,
+    },
+  ],
+};
 
 app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public"), { extensions: ["html"] }));
 
 const encode = (v) => Buffer.from(JSON.stringify(v)).toString("base64url");
-const sign = (v) => crypto.createHmac("sha256", process.env.SESSION_SECRET || "local-only").update(v).digest("base64url");
-const token = (v) => { const body=encode(v); return `${body}.${sign(body)}`; };
-function readToken(input) { try { const [body,sig]=String(input||"").split("."); const expected=sign(body); if(!sig||sig.length!==expected.length||!crypto.timingSafeEqual(Buffer.from(sig),Buffer.from(expected)))return null; const decoded=JSON.parse(Buffer.from(body,"base64url").toString("utf8")); return decoded.exp>Date.now()?decoded:null; } catch{return null;} }
-function cookies(req){return Object.fromEntries(String(req.headers.cookie||"").split(";").map(x=>x.trim().split(/=(.*)/s)).filter(x=>x[0]).map(([k,v])=>[k,decodeURIComponent(v||"")]));}
-function setSession(res,profile){res.setHeader("Set-Cookie",`conjures_session=${encodeURIComponent(token({...profile,exp:Date.now()+12*60*60*1000}))}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=43200`);}
-const pendingLoginTickets=new Map();
-function completeLogin(res,profile){const ticket=crypto.randomBytes(32).toString('base64url');pendingLoginTickets.set(ticket,{profile,expires:Date.now()+60*1000});res.redirect(`/auth/session?ticket=${encodeURIComponent(ticket)}`);}
-const id=()=>crypto.randomUUID();
-const safe=(value,max=4000)=>String(value??"").replace(/<@/g,"@\u200b").slice(0,max);
-async function api(route,options={}){const request={...options,headers:{...apiHeaders,...options.headers}},method=String(options.method||'GET').toUpperCase(),attempts=method==='GET'?3:1;let r;for(let attempt=1;attempt<=attempts;attempt+=1){try{r=await fetch(`${API_URL}${route}`,{...request,signal:AbortSignal.timeout(10_000)});break;}catch(error){if(attempt===attempts)throw error;await new Promise(resolve=>setTimeout(resolve,attempt*400));}}if(!r.ok){const text=await r.text();throw new Error(`API ${r.status}: ${text.slice(0,160)}`);}return r.status===204?null:r.json();}
-async function verification(query){const rows=await api(`/tables/verifications?${new URLSearchParams(query)}&limit=1`);return rows[0]||null;}
-async function discord(pathname,options={}){for(let attempt=1;attempt<=5;attempt+=1){const r=await fetch(`https://discord.com/api/v10${pathname}`,{...options,headers:{authorization:`Bot ${process.env.DISCORD_BOT_TOKEN}`,...options.headers}});if(r.ok)return r.status===204?null:r.json();const body=await r.text();if(r.status===429&&attempt<5){let retryAfter=1;try{retryAfter=Number(JSON.parse(body).retry_after||1)}catch{}await new Promise(resolve=>setTimeout(resolve,Math.min(Math.max(retryAfter*1000,500),15000)));continue}if(r.status>=500&&attempt<5){await new Promise(resolve=>setTimeout(resolve,attempt*500));continue}throw new Error(`Discord returned ${r.status}: ${body.slice(0,180)}`)}throw new Error('Discord request retries exhausted');}
-async function rankFor(userId){try{const r=await fetch(`https://groups.roblox.com/v2/users/${userId}/groups/roles`);const data=await r.json();const membership=(data.data||[]).find(x=>String(x.group?.id)===String(GROUP_ID));return {number:Number(membership?.role?.rank||0),name:membership?.role?.name||"Not in the group"};}catch{return {number:0,name:"Not in the group"};}}
-async function headshot(userId){try{const r=await fetch(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=false`);return (await r.json()).data?.[0]?.imageUrl||null;}catch{return null;}}
-async function enrich(row){const [member,roles,rank]=await Promise.all([
-  discord(`/guilds/${GUILD_ID}/members/${row.discord_id}`).catch(()=>null),
-  discord(`/guilds/${GUILD_ID}/roles`).catch(()=>[]), rankFor(row.roblox_user_id),
-]); const names=new Set((member?.roles||[]).map(roleId=>roles.find(r=>r.id===roleId)?.name).filter(Boolean)); return {...row,discordUsername:member?.user?.global_name||member?.user?.username||"Unknown",avatar:member?.user?.avatar,headshot:await headshot(row.roblox_user_id),roles:[...names],rank};}
-function editorAllowed(form,p){const roles=new Set(p.roles||[]);if(p.rank.number>=250)return true;const map={relations:"Relations Lead",hosting:"Hosting Lead",moderation:"Moderation Lead",events:"Events Lead",newsletter:"Newsletter Lead",social:"Social Media Lead"};if(form.id==="hr")return false;const role=map[form.id];return roles.has(role)&&(["events","newsletter","social"].includes(form.id)||p.rank.number===52);}
-function applyAllowed(form,p){const r=new Set(p.roles||[]);if(r.has("HR Team")&&!['events','newsletter','social'].includes(form.id))return false;if((r.has("Hosting Team")||r.has("Moderation Team"))&&['hosting','moderation','relations'].includes(form.id))return false;if(r.has("Relations Team")&&['relations','hosting','moderation','hr'].includes(form.id))return false;if(r.has("Events Team")&&form.id==='events')return false;if(r.has("Newsletter Team")&&form.id==='newsletter')return false;if(r.has("Social Media Team")&&form.id==='social')return false;return true;}
-async function current(req){const session=readToken(cookies(req).conjures_session);if(!session)return null;const row=await verification({discord_id:session.discordId}).catch(()=>null);return row?enrich(row):null;}
-async function requireUser(req,res,next){const user=await current(req);if(!user)return res.status(401).json({error:"You must log in with a verified account."});req.user=user;next();}
+const sign = (v) =>
+  crypto
+    .createHmac("sha256", process.env.SESSION_SECRET || "local-only")
+    .update(v)
+    .digest("base64url");
+const token = (v) => {
+  const body = encode(v);
+  return `${body}.${sign(body)}`;
+};
+function readToken(input) {
+  try {
+    const [body, sig] = String(input || "").split(".");
+    const expected = sign(body);
+    if (!sig || sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+    const decoded = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+    return decoded.exp > Date.now() ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+function cookies(req) {
+  return Object.fromEntries(
+    String(req.headers.cookie || "")
+      .split(";")
+      .map((x) => x.trim().split(/=(.*)/s))
+      .filter((x) => x[0])
+      .map(([k, v]) => [k, decodeURIComponent(v || "")]),
+  );
+}
+function setSession(res, profile) {
+  res.setHeader("Set-Cookie", `conjures_session=${encodeURIComponent(token({ ...profile, exp: Date.now() + 12 * 60 * 60 * 1000 }))}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=43200`);
+}
+const pendingLoginTickets = new Map();
+function completeLogin(res, profile) {
+  const ticket = crypto.randomBytes(32).toString("base64url");
+  pendingLoginTickets.set(ticket, { profile, expires: Date.now() + 60 * 1000 });
+  res.redirect(`/auth/session?ticket=${encodeURIComponent(ticket)}`);
+}
+const id = () => crypto.randomUUID();
+const safe = (value, max = 4000) =>
+  String(value ?? "")
+    .replace(/<@/g, "@\u200b")
+    .slice(0, max);
+async function api(route, options = {}) {
+  const request = {
+      ...options,
+      headers: { ...apiHeaders, ...options.headers },
+    },
+    method = String(options.method || "GET").toUpperCase(),
+    attempts = method === "GET" ? 3 : 1;
+  let r;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      r = await fetch(`${API_URL}${route}`, {
+        ...request,
+        signal: AbortSignal.timeout(10_000),
+      });
+      break;
+    } catch (error) {
+      if (attempt === attempts) throw error;
+      await new Promise((resolve) => setTimeout(resolve, attempt * 400));
+    }
+  }
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(`API ${r.status}: ${text.slice(0, 160)}`);
+  }
+  return r.status === 204 ? null : r.json();
+}
+async function verification(query) {
+  const rows = await api(`/tables/verifications?${new URLSearchParams(query)}&limit=1`);
+  return rows[0] || null;
+}
+async function discord(pathname, options = {}) {
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const r = await fetch(`https://discord.com/api/v10${pathname}`, {
+      ...options,
+      headers: {
+        authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}`,
+        ...options.headers,
+      },
+    });
+    if (r.ok) return r.status === 204 ? null : r.json();
+    const body = await r.text();
+    if (r.status === 429 && attempt < 5) {
+      let retryAfter = 1;
+      try {
+        retryAfter = Number(JSON.parse(body).retry_after || 1);
+      } catch {}
+      await new Promise((resolve) => setTimeout(resolve, Math.min(Math.max(retryAfter * 1000, 500), 15000)));
+      continue;
+    }
+    if (r.status >= 500 && attempt < 5) {
+      await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+      continue;
+    }
+    throw new Error(`Discord returned ${r.status}: ${body.slice(0, 180)}`);
+  }
+  throw new Error("Discord request retries exhausted");
+}
+async function rankFor(userId) {
+  try {
+    const r = await fetch(`https://groups.roblox.com/v2/users/${userId}/groups/roles`);
+    const data = await r.json();
+    const membership = (data.data || []).find((x) => String(x.group?.id) === String(GROUP_ID));
+    return {
+      number: Number(membership?.role?.rank || 0),
+      name: membership?.role?.name || "Not in the group",
+    };
+  } catch {
+    return { number: 0, name: "Not in the group" };
+  }
+}
+async function headshot(userId) {
+  try {
+    const r = await fetch(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=false`);
+    return (await r.json()).data?.[0]?.imageUrl || null;
+  } catch {
+    return null;
+  }
+}
+async function enrich(row) {
+  const [member, roles, rank] = await Promise.all([discord(`/guilds/${GUILD_ID}/members/${row.discord_id}`).catch(() => null), discord(`/guilds/${GUILD_ID}/roles`).catch(() => []), rankFor(row.roblox_user_id)]);
+  const names = new Set((member?.roles || []).map((roleId) => roles.find((r) => r.id === roleId)?.name).filter(Boolean));
+  return {
+    ...row,
+    discordUsername: member?.user?.global_name || member?.user?.username || "Unknown",
+    avatar: member?.user?.avatar,
+    headshot: await headshot(row.roblox_user_id),
+    roles: [...names],
+    rank,
+  };
+}
+function editorAllowed(form, p) {
+  const roles = new Set(p.roles || []);
+  if (p.rank.number >= 250) return true;
+  const map = {
+    relations: "Relations Lead",
+    hosting: "Hosting Lead",
+    moderation: "Moderation Lead",
+    events: "Events Lead",
+    newsletter: "Newsletter Lead",
+    social: "Social Media Lead",
+  };
+  if (form.id === "hr") return false;
+  const role = map[form.id];
+  return roles.has(role) && (["events", "newsletter", "social"].includes(form.id) || p.rank.number === 52);
+}
+function applyAllowed(form, p) {
+  const r = new Set(p.roles || []);
+  if (r.has("HR Team") && !["events", "newsletter", "social"].includes(form.id)) return false;
+  if ((r.has("Hosting Team") || r.has("Moderation Team")) && ["hosting", "moderation", "relations"].includes(form.id)) return false;
+  if (r.has("Relations Team") && ["relations", "hosting", "moderation", "hr"].includes(form.id)) return false;
+  if (r.has("Events Team") && form.id === "events") return false;
+  if (r.has("Newsletter Team") && form.id === "newsletter") return false;
+  if (r.has("Social Media Team") && form.id === "social") return false;
+  return true;
+}
+async function current(req) {
+  const session = readToken(cookies(req).conjures_session);
+  if (!session) return null;
+  const row = await verification({ discord_id: session.discordId }).catch(() => null);
+  if (!row) return null;
+  const blocked = await api(`/tables/site_blacklists?roblox_user_id=${encodeURIComponent(row.roblox_user_id)}&limit=1`).catch(() => []);
+  return { ...(await enrich(row)), siteBlacklisted: Boolean(blocked[0]) };
+}
+async function requireUser(req, res, next) {
+  const user = await current(req);
+  if (!user) return res.status(401).json({ error: "You must log in with a verified account." });
+  if (user.siteBlacklisted) return res.status(403).json({ error: "Your account is blacklisted from this site." });
+  req.user = user;
+  next();
+}
+async function applicationState(user) {
+  if (!user) return { state: null, daysRemaining: 0 };
+  const [blocked, past] = await Promise.all([api(`/tables/application_blacklists?roblox_user_id=${encodeURIComponent(user.roblox_user_id)}&limit=1`), api(`/tables/application_submissions?roblox_user_id=${encodeURIComponent(user.roblox_user_id)}&order=submitted_at.desc`)]);
+  if (blocked[0]) return { state: "blacklisted", daysRemaining: 0 };
+  const stale = past.filter((x) => x.status === "pending" && !x.discord_message_id);
+  for (const item of stale) await api(`/tables/application_submissions?id=${encodeURIComponent(item.id)}`, { method: "DELETE" });
+  if (past.some((x) => x.status === "pending" && x.discord_message_id)) return { state: "pending", daysRemaining: 0 };
+  const denial = past.find((x) => x.status === "denied" && Date.now() - new Date(x.decided_at || x.updated_at).getTime() < 7 * 86400000);
+  if (denial) {
+    const remaining = 7 * 86400000 - (Date.now() - new Date(denial.decided_at || denial.updated_at).getTime());
+    return {
+      state: "denied",
+      daysRemaining: Math.max(1, Math.ceil(remaining / 86400000)),
+    };
+  }
+  return { state: null, daysRemaining: 0 };
+}
+const submissionLocks = new Set();
 
-async function seed(){for(const [formId,name,shortName,label,color,channel,roles] of FORMS){const existing=await api(`/tables/application_forms?id=${formId}&limit=1`);if(existing.length)continue;await api('/tables/application_forms',{method:'POST',body:JSON.stringify({id:formId,name,short_name:shortName,team_label:label,team_color:color,description:'',is_open:false,schema_json:JSON.stringify([LOCKED_SECTION]),channel_id:channel,ping_role_ids:JSON.stringify(roles),created_at:new Date().toISOString(),updated_at:new Date().toISOString()})});}}
+async function seed() {
+  for (const [formId, name, shortName, label, color, channel, roles] of FORMS) {
+    const existing = await api(`/tables/application_forms?id=${formId}&limit=1`);
+    if (existing.length) continue;
+    await api("/tables/application_forms", {
+      method: "POST",
+      body: JSON.stringify({
+        id: formId,
+        name,
+        short_name: shortName,
+        team_label: label,
+        team_color: color,
+        description: "",
+        is_open: false,
+        schema_json: JSON.stringify([LOCKED_SECTION]),
+        channel_id: channel,
+        ping_role_ids: JSON.stringify(roles),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }),
+    });
+  }
+}
 
-app.get('/health',(_q,res)=>res.json({ok:true,service:'conjures-net'}));
-app.get('/api/me',async(req,res)=>{const user=await current(req);res.json(user?{authenticated:true,...user}:{authenticated:false});});
-app.get('/api/applications',async(req,res)=>{try{await seed();const user=await current(req);const forms=await api('/tables/application_forms?order=created_at.asc');res.json(forms.filter(f=>f.is_open||user&&editorAllowed(f,user)).map(f=>({...f,schema:JSON.parse(f.schema_json||'[]'),canEdit:Boolean(user&&editorAllowed(f,user)),canApply:Boolean(user&&f.is_open&&applyAllowed(f,user))})));}catch(e){console.error(e);res.status(500).json({error:'Applications could not be loaded.'});}});
-app.get('/api/applications/:id',async(req,res)=>{try{const forms=await api(`/tables/application_forms?id=${encodeURIComponent(req.params.id)}&limit=1`);const form=forms[0],user=await current(req);if(!form||(!form.is_open&&!user))return res.status(404).json({error:'Application not found.'});res.json({...form,schema:JSON.parse(form.schema_json||'[]'),canEdit:Boolean(user&&editorAllowed(form,user)),canApply:Boolean(user&&form.is_open&&applyAllowed(form,user)),user});}catch(e){res.status(500).json({error:e.message});}});
-app.put('/api/applications/:id',requireUser,async(req,res)=>{try{const forms=await api(`/tables/application_forms?id=${encodeURIComponent(req.params.id)}&limit=1`),form=forms[0];if(!form||!editorAllowed(form,req.user))return res.status(403).json({error:'You cannot edit this application.'});const schema=Array.isArray(req.body.schema)?req.body.schema:[];if(!schema[0]?.locked)return res.status(400).json({error:'The Information section is required.'});const updated={...form,description:safe(req.body.description,12000),is_open:Boolean(req.body.isOpen),schema_json:JSON.stringify(schema).slice(0,100000),updated_by_discord_id:req.user.discord_id,updated_at:new Date().toISOString()};await api('/tables/application_forms',{method:'POST',body:JSON.stringify(updated)});res.json({ok:true});}catch(e){res.status(500).json({error:e.message});}});
+app.get("/health", (_q, res) => res.json({ ok: true, service: "conjures-net" }));
+app.get("/api/me", async (req, res) => {
+  const user = await current(req);
+  res.json(user ? (user.siteBlacklisted ? { authenticated: false, siteBlacklisted: true } : { authenticated: true, ...user }) : { authenticated: false });
+});
+app.get("/api/applications", async (req, res) => {
+  try {
+    await seed();
+    const rawUser = await current(req),
+      user = rawUser && !rawUser.siteBlacklisted ? rawUser : null,
+      state = await applicationState(user);
+    const forms = await api("/tables/application_forms?order=created_at.asc");
+    res.json(
+      forms
+        .filter((f) => f.is_open || (user && editorAllowed(f, user)))
+        .map((f) => ({
+          ...f,
+          schema: JSON.parse(f.schema_json || "[]"),
+          canEdit: Boolean(user && editorAllowed(f, user)),
+          applicationState: state.state,
+          daysRemaining: state.daysRemaining,
+          canApply: Boolean(user && f.is_open && applyAllowed(f, user) && !state.state),
+        })),
+    );
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Applications could not be loaded." });
+  }
+});
+app.get("/api/applications/:id", async (req, res) => {
+  try {
+    const forms = await api(`/tables/application_forms?id=${encodeURIComponent(req.params.id)}&limit=1`);
+    const form = forms[0],
+      rawUser = await current(req),
+      user = rawUser && !rawUser.siteBlacklisted ? rawUser : null,
+      state = await applicationState(user);
+    if (!form || (!form.is_open && !user)) return res.status(404).json({ error: "Application not found." });
+    res.json({
+      ...form,
+      schema: JSON.parse(form.schema_json || "[]"),
+      canEdit: Boolean(user && editorAllowed(form, user)),
+      applicationState: state.state,
+      daysRemaining: state.daysRemaining,
+      canApply: Boolean(user && form.is_open && applyAllowed(form, user) && !state.state),
+      user,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+app.put("/api/applications/:id", requireUser, async (req, res) => {
+  try {
+    const forms = await api(`/tables/application_forms?id=${encodeURIComponent(req.params.id)}&limit=1`),
+      form = forms[0];
+    if (!form || !editorAllowed(form, req.user)) return res.status(403).json({ error: "You cannot edit this application." });
+    const schema = Array.isArray(req.body.schema) ? req.body.schema : [];
+    if (!schema[0]?.locked) return res.status(400).json({ error: "The Information section is required." });
+    const updated = {
+      ...form,
+      description: safe(req.body.description, 12000),
+      is_open: Boolean(req.body.isOpen),
+      schema_json: JSON.stringify(schema).slice(0, 100000),
+      updated_by_discord_id: req.user.discord_id,
+      updated_at: new Date().toISOString(),
+    };
+    await api("/tables/application_forms", {
+      method: "POST",
+      body: JSON.stringify(updated),
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
-app.post('/api/applications/:id/submit',requireUser,async(req,res)=>{try{const forms=await api(`/tables/application_forms?id=${encodeURIComponent(req.params.id)}&limit=1`),form=forms[0];if(!form?.is_open)return res.status(409).json({error:'This application is not open.'});if(!applyAllowed(form,req.user))return res.status(403).json({error:'You are unable to apply.'});const past=await api(`/tables/application_submissions?roblox_user_id=${req.user.roblox_user_id}&order=submitted_at.desc`),stale=past.filter(x=>x.status==='pending'&&!x.discord_message_id);for(const item of stale)await api(`/tables/application_submissions?id=${encodeURIComponent(item.id)}`,{method:'DELETE'});if(past.some(x=>x.status==='pending'&&x.discord_message_id))return res.status(409).json({error:'You already have a pending application.'});const denial=past.find(x=>x.status==='denied'&&Date.now()-new Date(x.decided_at||x.updated_at).getTime()<7*86400000);if(denial)return res.status(409).json({error:'You must wait seven days after a denial before applying again.'});const schema=JSON.parse(form.schema_json||'[]'),answers=req.body.answers||{};answers.roblox_username=req.user.roblox_username;answers.roblox_id=req.user.roblox_user_id;answers.discord_id=req.user.discord_id;for(const section of schema)for(const q of section.questions||[])if(q.required&&!String(answers[q.id]??'').trim())return res.status(400).json({error:`${q.title} is required.`});const submission={id:id(),application_id:form.id,roblox_user_id:req.user.roblox_user_id,roblox_username:req.user.roblox_username,discord_id:req.user.discord_id,answers_json:JSON.stringify(answers),status:'pending',submitted_at:new Date().toISOString(),updated_at:new Date().toISOString()};const fields=[{name:'Roblox Username',value:safe(req.user.roblox_username,1024),inline:true},{name:'Roblox ID',value:req.user.roblox_user_id,inline:true},{name:'Discord ID',value:req.user.discord_id,inline:true}];for(const section of schema)for(const q of section.questions||[])if(!q.locked)fields.push({name:safe(q.title,256),value:safe(Array.isArray(answers[q.id])?answers[q.id].join(', '):answers[q.id]||'N/A',1024),inline:false});const thumbnail=await headshot(req.user.roblox_user_id),embeds=[];for(let i=0;i<fields.length;i+=22)embeds.push({title:i?undefined:`${form.short_name}: ${req.user.roblox_username} (${req.user.roblox_user_id})`,...(i||!thumbnail?{}:{thumbnail:{url:thumbnail}}),fields:fields.slice(i,i+22)});const roleIds=JSON.parse(form.ping_role_ids||'[]'),content=roleIds.map(x=>`<@&${x}>`).join(' ');const message=await discord(`/channels/${form.channel_id}/messages`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({content,embeds,allowed_mentions:{roles:roleIds},components:[{type:1,components:[{type:2,style:2,label:'Accept',custom_id:`application:accept:${submission.id}`},{type:2,style:2,label:'Deny',custom_id:`application:deny:${submission.id}`}]}]})});await discord(`/channels/${form.channel_id}/messages/${message.id}/reactions/${encodeURIComponent('cdepts_yes:1537731698245115936')}/@me`,{method:'PUT'});await discord(`/channels/${form.channel_id}/messages/${message.id}/reactions/${encodeURIComponent('cdepts_no:1537731724375498773')}/@me`,{method:'PUT'});const thread=await discord(`/channels/${form.channel_id}/messages/${message.id}/threads`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:`${req.user.roblox_username} (${req.user.roblox_user_id}) - ${form.short_name}`,auto_archive_duration:1440})});submission.discord_message_id=message.id;submission.discord_thread_id=thread.id;submission.updated_at=new Date().toISOString();await api('/tables/application_submissions',{method:'POST',body:JSON.stringify(submission)});res.json({ok:true});}catch(e){console.error('[applications] submit failed',e);res.status(500).json({error:'Your application could not be submitted. Please try again.'});}});
+app.post("/api/applications/:id/submit", requireUser, async (req, res) => {
+  const lockKey = req.user.roblox_user_id;
+  if (submissionLocks.has(lockKey)) return res.status(409).json({ error: "Your application is already being submitted." });
+  submissionLocks.add(lockKey);
+  try {
+    const forms = await api(`/tables/application_forms?id=${encodeURIComponent(req.params.id)}&limit=1`),
+      form = forms[0];
+    if (!form?.is_open) return res.status(409).json({ error: "This application is not open." });
+    if (!applyAllowed(form, req.user)) return res.status(403).json({ error: "You are unable to apply." });
+    const state = await applicationState(req.user);
+    if (state.state === "blacklisted") return res.status(403).json({ error: "You are blacklisted from submitting applications." });
+    if (state.state === "pending") return res.status(409).json({ error: "You already have a pending application." });
+    if (state.state === "denied")
+      return res.status(409).json({
+        error: `You may apply again in ${state.daysRemaining} day${state.daysRemaining === 1 ? "" : "s"}.`,
+      });
+    const schema = JSON.parse(form.schema_json || "[]"),
+      answers = req.body.answers || {};
+    answers.roblox_username = req.user.roblox_username;
+    answers.roblox_id = req.user.roblox_user_id;
+    answers.discord_id = req.user.discord_id;
+    for (const section of schema) for (const q of section.questions || []) if (q.required && !String(answers[q.id] ?? "").trim()) return res.status(400).json({ error: `${q.title} is required.` });
+    const submission = {
+      id: id(),
+      application_id: form.id,
+      roblox_user_id: req.user.roblox_user_id,
+      roblox_username: req.user.roblox_username,
+      discord_id: req.user.discord_id,
+      answers_json: JSON.stringify(answers),
+      status: "pending",
+      submitted_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const fields = [
+      {
+        name: "Roblox Username",
+        value: safe(req.user.roblox_username, 1024),
+        inline: true,
+      },
+      { name: "Roblox ID", value: req.user.roblox_user_id, inline: true },
+      { name: "Discord ID", value: req.user.discord_id, inline: true },
+    ];
+    for (const section of schema)
+      for (const q of section.questions || [])
+        if (!q.locked)
+          fields.push({
+            name: safe(q.title, 256),
+            value: safe(Array.isArray(answers[q.id]) ? answers[q.id].join(", ") : answers[q.id] || "N/A", 1024),
+            inline: false,
+          });
+    const thumbnail = await headshot(req.user.roblox_user_id),
+      embeds = [];
+    for (let i = 0; i < fields.length; i += 22)
+      embeds.push({
+        title: i ? undefined : `${form.short_name}: ${req.user.roblox_username} (${req.user.roblox_user_id})`,
+        ...(i || !thumbnail ? {} : { thumbnail: { url: thumbnail } }),
+        fields: fields.slice(i, i + 22),
+      });
+    const roleIds = JSON.parse(form.ping_role_ids || "[]"),
+      content = roleIds.map((x) => `<@&${x}>`).join(" ");
+    const message = await discord(`/channels/${form.channel_id}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        content,
+        embeds,
+        allowed_mentions: { roles: roleIds },
+        components: [
+          {
+            type: 1,
+            components: [
+              {
+                type: 2,
+                style: 2,
+                label: "Accept",
+                custom_id: `application:accept:${submission.id}`,
+              },
+              {
+                type: 2,
+                style: 2,
+                label: "Deny",
+                custom_id: `application:deny:${submission.id}`,
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    await discord(`/channels/${form.channel_id}/messages/${message.id}/reactions/${encodeURIComponent("cdepts_yes:1537731698245115936")}/@me`, { method: "PUT" });
+    await discord(`/channels/${form.channel_id}/messages/${message.id}/reactions/${encodeURIComponent("cdepts_no:1537731724375498773")}/@me`, { method: "PUT" });
+    const thread = await discord(`/channels/${form.channel_id}/messages/${message.id}/threads`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: `${req.user.roblox_username} (${req.user.roblox_user_id}) - ${form.short_name}`,
+        auto_archive_duration: 1440,
+      }),
+    });
+    submission.discord_message_id = message.id;
+    submission.discord_thread_id = thread.id;
+    submission.updated_at = new Date().toISOString();
+    await api("/tables/application_submissions", {
+      method: "POST",
+      body: JSON.stringify(submission),
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("[applications] submit failed", e);
+    res.status(500).json({
+      error: "Your application could not be submitted. Please try again.",
+    });
+  } finally {
+    submissionLocks.delete(lockKey);
+  }
+});
 
-const pendingOauthStates=new Map();
-function pruneOauthStates(){const now=Date.now();for(const [nonce,state] of pendingOauthStates)if(state.expires<=now)pendingOauthStates.delete(nonce);}
-function beginOauth(_res,provider){pruneOauthStates();const nonce=crypto.randomBytes(32).toString('base64url');pendingOauthStates.set(nonce,{provider,expires:Date.now()+10*60*1000});return nonce;}
-function validateOauth(req,_res,provider){pruneOauthStates();const nonce=String(req.query.state||''),state=pendingOauthStates.get(nonce);if(!state||state.provider!==provider||!req.query.code)return false;pendingOauthStates.delete(nonce);return true;}
-app.get('/auth/discord',(req,res)=>{const redirect=`${PUBLIC_URL}/auth/discord/callback`,state=beginOauth(res,'discord');res.redirect(`https://discord.com/oauth2/authorize?client_id=${encodeURIComponent(process.env.DISCORD_CLIENT_ID)}&response_type=code&redirect_uri=${encodeURIComponent(redirect)}&scope=identify&state=${encodeURIComponent(state)}`);});
-app.get('/auth/discord/callback',async(req,res)=>{try{if(!validateOauth(req,res,'discord'))throw new Error('invalid oauth state');const redirect=`${PUBLIC_URL}/auth/discord/callback`;const body=new URLSearchParams({client_id:process.env.DISCORD_CLIENT_ID,client_secret:process.env.DISCORD_CLIENT_SECRET,grant_type:'authorization_code',code:String(req.query.code),redirect_uri:redirect});const tr=await fetch('https://discord.com/api/v10/oauth2/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body});if(!tr.ok)throw new Error(`discord token exchange failed (${tr.status})`);const access=await tr.json();const ur=await fetch('https://discord.com/api/v10/users/@me',{headers:{authorization:`Bearer ${access.access_token}`}});if(!ur.ok)throw new Error(`discord profile lookup failed (${ur.status})`);const du=await ur.json();const row=await verification({discord_id:du.id});if(!row)return res.redirect('/?error=verification_required');completeLogin(res,{discordId:row.discord_id,robloxId:row.roblox_user_id});}catch(error){console.warn('[oauth] Discord login failed -',error.message);res.redirect('/?error=login_failed');}});
-app.get('/auth/roblox',(req,res)=>{const redirect=`${PUBLIC_URL}/auth/roblox/callback`,state=beginOauth(res,'roblox');res.redirect(`https://apis.roblox.com/oauth/v1/authorize?client_id=${encodeURIComponent(process.env.ROBLOX_CLIENT_ID)}&redirect_uri=${encodeURIComponent(redirect)}&scope=openid%20profile&response_type=code&state=${encodeURIComponent(state)}`);});
-app.get('/auth/roblox/callback',async(req,res)=>{try{if(!validateOauth(req,res,'roblox'))throw new Error('invalid oauth state');const redirect=`${PUBLIC_URL}/auth/roblox/callback`;const basic=Buffer.from(`${process.env.ROBLOX_CLIENT_ID}:${process.env.ROBLOX_CLIENT_SECRET}`).toString('base64');const body=new URLSearchParams({grant_type:'authorization_code',code:String(req.query.code),redirect_uri:redirect});const tr=await fetch('https://apis.roblox.com/oauth/v1/token',{method:'POST',headers:{authorization:`Basic ${basic}`,'content-type':'application/x-www-form-urlencoded'},body});if(!tr.ok)throw new Error(`roblox token exchange failed (${tr.status})`);const access=await tr.json();const ur=await fetch('https://apis.roblox.com/oauth/v1/userinfo',{headers:{authorization:`Bearer ${access.access_token}`}});if(!ur.ok)throw new Error(`roblox profile lookup failed (${ur.status})`);const ru=await ur.json();if(!ru.sub)throw new Error('roblox profile missing id');const row=await verification({roblox_user_id:String(ru.sub)});if(!row)return res.redirect('/?error=verification_required');completeLogin(res,{discordId:row.discord_id,robloxId:row.roblox_user_id});}catch(error){console.warn('[oauth] Roblox login failed -',error.message);res.redirect('/?error=login_failed');}});
-app.get('/auth/session',(req,res)=>{const now=Date.now();for(const [key,value] of pendingLoginTickets)if(value.expires<=now)pendingLoginTickets.delete(key);const ticket=String(req.query.ticket||''),entry=pendingLoginTickets.get(ticket);if(!entry)return res.redirect('/?error=login_failed');pendingLoginTickets.delete(ticket);setSession(res,entry.profile);res.redirect('/dashboard');});
-app.get('/auth/logout',(_req,res)=>{res.setHeader('Set-Cookie','conjures_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0');res.redirect('/');});
-app.get(['/dashboard','/applications','/applications/:id','/applications/:id/edit','/terms','/privacy'],(_req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
+const pendingOauthStates = new Map();
+function pruneOauthStates() {
+  const now = Date.now();
+  for (const [nonce, state] of pendingOauthStates) if (state.expires <= now) pendingOauthStates.delete(nonce);
+}
+function beginOauth(_res, provider) {
+  pruneOauthStates();
+  const nonce = crypto.randomBytes(32).toString("base64url");
+  pendingOauthStates.set(nonce, {
+    provider,
+    expires: Date.now() + 10 * 60 * 1000,
+  });
+  return nonce;
+}
+function validateOauth(req, _res, provider) {
+  pruneOauthStates();
+  const nonce = String(req.query.state || ""),
+    state = pendingOauthStates.get(nonce);
+  if (!state || state.provider !== provider || !req.query.code) return false;
+  pendingOauthStates.delete(nonce);
+  return true;
+}
+app.get("/auth/discord", (req, res) => {
+  const redirect = `${PUBLIC_URL}/auth/discord/callback`,
+    state = beginOauth(res, "discord");
+  res.redirect(`https://discord.com/oauth2/authorize?client_id=${encodeURIComponent(process.env.DISCORD_CLIENT_ID)}&response_type=code&redirect_uri=${encodeURIComponent(redirect)}&scope=identify&state=${encodeURIComponent(state)}`);
+});
+app.get("/auth/discord/callback", async (req, res) => {
+  try {
+    if (!validateOauth(req, res, "discord")) throw new Error("invalid oauth state");
+    const redirect = `${PUBLIC_URL}/auth/discord/callback`;
+    const body = new URLSearchParams({
+      client_id: process.env.DISCORD_CLIENT_ID,
+      client_secret: process.env.DISCORD_CLIENT_SECRET,
+      grant_type: "authorization_code",
+      code: String(req.query.code),
+      redirect_uri: redirect,
+    });
+    const tr = await fetch("https://discord.com/api/v10/oauth2/token", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body,
+    });
+    if (!tr.ok) throw new Error(`discord token exchange failed (${tr.status})`);
+    const access = await tr.json();
+    const ur = await fetch("https://discord.com/api/v10/users/@me", {
+      headers: { authorization: `Bearer ${access.access_token}` },
+    });
+    if (!ur.ok) throw new Error(`discord profile lookup failed (${ur.status})`);
+    const du = await ur.json();
+    const row = await verification({ discord_id: du.id });
+    if (!row) return res.redirect("/?error=verification_required");
+    const blocked = await api(`/tables/site_blacklists?roblox_user_id=${encodeURIComponent(row.roblox_user_id)}&limit=1`);
+    if (blocked[0]) return res.redirect("/?error=site_blacklisted");
+    completeLogin(res, {
+      discordId: row.discord_id,
+      robloxId: row.roblox_user_id,
+    });
+  } catch (error) {
+    console.warn("[oauth] Discord login failed -", error.message);
+    res.redirect("/?error=login_failed");
+  }
+});
+app.get("/auth/roblox", (req, res) => {
+  const redirect = `${PUBLIC_URL}/auth/roblox/callback`,
+    state = beginOauth(res, "roblox");
+  res.redirect(`https://apis.roblox.com/oauth/v1/authorize?client_id=${encodeURIComponent(process.env.ROBLOX_CLIENT_ID)}&redirect_uri=${encodeURIComponent(redirect)}&scope=openid%20profile&response_type=code&state=${encodeURIComponent(state)}`);
+});
+app.get("/auth/roblox/callback", async (req, res) => {
+  try {
+    if (!validateOauth(req, res, "roblox")) throw new Error("invalid oauth state");
+    const redirect = `${PUBLIC_URL}/auth/roblox/callback`;
+    const basic = Buffer.from(`${process.env.ROBLOX_CLIENT_ID}:${process.env.ROBLOX_CLIENT_SECRET}`).toString("base64");
+    const body = new URLSearchParams({
+      grant_type: "authorization_code",
+      code: String(req.query.code),
+      redirect_uri: redirect,
+    });
+    const tr = await fetch("https://apis.roblox.com/oauth/v1/token", {
+      method: "POST",
+      headers: {
+        authorization: `Basic ${basic}`,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+    if (!tr.ok) throw new Error(`roblox token exchange failed (${tr.status})`);
+    const access = await tr.json();
+    const ur = await fetch("https://apis.roblox.com/oauth/v1/userinfo", {
+      headers: { authorization: `Bearer ${access.access_token}` },
+    });
+    if (!ur.ok) throw new Error(`roblox profile lookup failed (${ur.status})`);
+    const ru = await ur.json();
+    if (!ru.sub) throw new Error("roblox profile missing id");
+    const row = await verification({ roblox_user_id: String(ru.sub) });
+    if (!row) return res.redirect("/?error=verification_required");
+    const blocked = await api(`/tables/site_blacklists?roblox_user_id=${encodeURIComponent(row.roblox_user_id)}&limit=1`);
+    if (blocked[0]) return res.redirect("/?error=site_blacklisted");
+    completeLogin(res, {
+      discordId: row.discord_id,
+      robloxId: row.roblox_user_id,
+    });
+  } catch (error) {
+    console.warn("[oauth] Roblox login failed -", error.message);
+    res.redirect("/?error=login_failed");
+  }
+});
+app.get("/auth/session", (req, res) => {
+  const now = Date.now();
+  for (const [key, value] of pendingLoginTickets) if (value.expires <= now) pendingLoginTickets.delete(key);
+  const ticket = String(req.query.ticket || ""),
+    entry = pendingLoginTickets.get(ticket);
+  if (!entry) return res.redirect("/?error=login_failed");
+  pendingLoginTickets.delete(ticket);
+  setSession(res, entry.profile);
+  res.redirect("/dashboard");
+});
+app.get("/auth/logout", (_req, res) => {
+  res.setHeader("Set-Cookie", "conjures_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0");
+  res.redirect("/");
+});
+app.get(["/dashboard", "/applications", "/applications/:id", "/applications/:id/edit", "/terms", "/privacy"], (_req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
 
 const port = Number(process.env.PORT || 3000);
 app.listen(port, "0.0.0.0", () => console.log(`[conjures-net] ready on ${port}`));
