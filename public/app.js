@@ -155,44 +155,88 @@ async function applyPage(formId) {
       '<div class="success"><h1>You are unable to apply</h1><p class="muted">This application is unavailable for your account.</p></div>';
     return;
   }
-  let dirty = false;
-  app.innerHTML = `<div class="form-shell"><a class="back" href="/applications">← Back to Applications</a><div class="form-title"><span class="tag" style="--team:${esc(f.team_color)}">${esc(f.team_label)}</span><h1>${esc(f.name)}</h1><p class="description">${esc(f.description)}</p></div><form id="application-form">${f.schema.map((s) => `<section class="section"><h2>${esc(s.title)}</h2><p class="muted">${esc(s.description || "")}</p>${(s.questions || []).map((q) => `<div class="question"><label>${esc(q.title)} ${q.required ? '<span class="required">*</span>' : ""}</label>${q.description ? `<small>${esc(q.description)}</small>` : ""}${inputFor(q, q.id === "roblox_username" ? me.roblox_username : q.id === "roblox_id" ? me.roblox_user_id : q.id === "discord_id" ? me.discord_id : "")}</div>`).join("")}</section>`).join("")}<div class="submit-row"><button type="submit" class="primary">Submit Application</button></div></form></div>`;
-  const form = document.querySelector("#application-form");
-  form.addEventListener("input", () => (dirty = true));
+  let dirty = false,
+    sectionIndex = 0;
+  const answers = {
+    roblox_username: me.roblox_username,
+    roblox_id: me.roblox_user_id,
+    discord_id: me.discord_id,
+  };
+  const collect = (root) =>
+    root.querySelectorAll("[data-q]").forEach((el) => {
+      if (el.type === "checkbox") {
+        if (el.checked) (answers[el.dataset.q] ??= []).push(el.value);
+      } else if (el.type !== "radio" || el.checked)
+        answers[el.dataset.q] = el.value;
+    });
+  const renderSection = () => {
+    const section = f.schema[sectionIndex],
+      last = sectionIndex === f.schema.length - 1;
+    app.innerHTML = `<div class="form-shell"><a class="back" href="/applications">← Back to Applications</a><div class="form-title"><span class="tag" style="--team:${esc(f.team_color)}">${esc(f.team_label)}</span><h1>${esc(f.name)}</h1><p class="description">${esc(f.description)}</p></div><form id="application-form"><section class="section"><h2>${esc(section.title)}</h2><p class="muted">${esc(section.description || "")}</p>${(section.questions || []).map((q) => `<div class="question"><label>${esc(q.title)} ${q.required ? '<span class="required">*</span>' : ""}</label>${q.description ? `<small>${esc(q.description)}</small>` : ""}${inputFor(q, answers[q.id] ?? "")}</div>`).join("")}</section><div class="submit-row">${sectionIndex ? '<button type="button" class="ghost" id="previous-section">Back</button>' : ""}<button type="submit" class="primary">${last ? "Submit Application" : "Next"}</button></div></form></div>`;
+    document.querySelector(".back").onclick = (event) => {
+      if (!dirty) return;
+      event.preventDefault();
+      showModal(
+        "Discard Application",
+        "You have entered application responses. Are you sure you would like to leave?",
+        () => {
+          dirty = false;
+          location.assign("/applications");
+        },
+      );
+    };
+    const form = document.querySelector("#application-form");
+    for (const q of section.questions || [])
+      fillChoices(form, q, answers[q.id]);
+    form.addEventListener("input", () => (dirty = true));
+    const previous = document.querySelector("#previous-section");
+    if (previous)
+      previous.onclick = () => {
+        answersForSection(section, form);
+        sectionIndex--;
+        renderSection();
+      };
+    form.onsubmit = (event) => {
+      event.preventDefault();
+      if (!form.reportValidity()) return;
+      answersForSection(section, form);
+      if (!last) {
+        sectionIndex++;
+        renderSection();
+        return;
+      }
+      showModal(
+        "Submit Application",
+        "Are you sure you would like to submit this application? You cannot edit it after submission.",
+        async () => {
+          try {
+            await request(`/api/applications/${formId}/submit`, {
+              method: "POST",
+              body: JSON.stringify({ answers }),
+            });
+            dirty = false;
+            window.onbeforeunload = null;
+            app.innerHTML =
+              '<div class="success"><div class="check">✓</div><h1>Application submitted</h1><p>Your application has been successfully submitted. Please ensure you follow the guidelines of the application via the announcement. Best of luck!</p></div>';
+          } catch (err) {
+            showNotice("Application Not Submitted", err.message);
+          }
+        },
+      );
+    };
+  };
+  const answersForSection = (section, root) => {
+    for (const q of section.questions || [])
+      if (q.type === "checkboxes") answers[q.id] = [];
+    collect(root);
+  };
   guardNavigation(
     () => dirty,
     () => (dirty = false),
   );
   window.onbeforeunload = () =>
     dirty ? "You have unsaved changes." : undefined;
-  form.onsubmit = (e) => {
-    e.preventDefault();
-    showModal(
-      "Submit Application",
-      "Are you sure you would like to submit this application? You cannot edit it after submission.",
-      async () => {
-        const answers = {};
-        document.querySelectorAll("[data-q]").forEach((el) => {
-          if (el.type === "checkbox") {
-            if (el.checked) (answers[el.dataset.q] ??= []).push(el.value);
-          } else if (el.type !== "radio" || el.checked)
-            answers[el.dataset.q] = el.value;
-        });
-        try {
-          await request(`/api/applications/${formId}/submit`, {
-            method: "POST",
-            body: JSON.stringify({ answers }),
-          });
-          dirty = false;
-          window.onbeforeunload = null;
-          app.innerHTML =
-            '<div class="success"><div class="check">✓</div><h1>Application submitted</h1><p>Your application has been successfully submitted. Please ensure you follow the guidelines of the application via the announcement. Best of luck!</p></div>';
-        } catch (err) {
-          showNotice("Application Not Submitted", err.message);
-        }
-      },
-    );
-  };
+  renderSection();
 }
 const uid = () => crypto.randomUUID();
 function editorQuestion(q, si, qi) {
@@ -235,6 +279,9 @@ async function editPage(formId) {
     dirty = true;
   }
   function bind() {
+    document
+      .querySelectorAll(".section-desc")
+      .forEach((field) => (field.disabled = false));
     document
       .querySelectorAll("input,textarea,select")
       .forEach((x) => (x.oninput = sync));
@@ -460,24 +507,26 @@ async function examPage(id) {
       return;
     }
     const q = p.question;
-    app.innerHTML = `<div class="form-shell exam-runner"><div class="form-title"><span class="tag" style="--team:${esc(f.team_color)}">${esc(f.team_label)}</span><h1>${esc(f.name)}</h1><p class="muted">Question ${p.index + 1} of ${p.total}</p>${p.deadline ? `<div class="exam-timer" id="exam-timer"></div>` : ""}</div><section class="section"><div class="question"><label>${esc(q.title)} ${q.required ? '<span class="required">*</span>' : ""}</label>${q.description ? `<small>${esc(q.description)}</small>` : ""}${inputFor(q)}</div><div class="submit-row"><button class="primary" id="exam-next">${p.index + 1 === p.total ? "Submit Examination" : "Next"}</button></div></section></div>`;
+    const sectionIntro = q.type === "section_intro";
+    app.innerHTML = `<div class="form-shell exam-runner"><div class="form-title"><span class="tag" style="--team:${esc(f.team_color)}">${esc(f.team_label)}</span><h1>${esc(f.name)}</h1><p class="muted">${sectionIntro ? "New Section" : `Question ${p.index + 1} of ${p.total}`}</p>${p.deadline ? `<div class="exam-timer" id="exam-timer"></div>` : ""}</div><section class="section">${sectionIntro ? `<h2>${esc(q.title)}</h2><p class="description">${esc(q.description || "")}</p>` : `<div class="question"><label>${esc(q.title)} ${q.required ? '<span class="required">*</span>' : ""}</label>${q.description ? `<small>${esc(q.description)}</small>` : ""}${inputFor(q)}</div>`}<div class="submit-row"><button class="primary" id="exam-next">${p.index + 1 === p.total ? "Submit Examination" : "Next"}</button></div></section></div>`;
     const root = document.querySelector(".exam-runner");
-    fillChoices(root, q, p.draft);
+    if (!sectionIntro) fillChoices(root, q, p.draft);
     let saveTimer;
-    root.addEventListener("input", () => {
-      clearTimeout(saveTimer);
-      saveTimer = setTimeout(
-        () =>
-          request(`/api/exams/${id}/draft`, {
-            method: "PATCH",
-            body: JSON.stringify({
-              questionId: q.id,
-              answer: readAnswer(root, q),
-            }),
-          }).catch(() => {}),
-        500,
-      );
-    });
+    if (!sectionIntro)
+      root.addEventListener("input", () => {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(
+          () =>
+            request(`/api/exams/${id}/draft`, {
+              method: "PATCH",
+              body: JSON.stringify({
+                questionId: q.id,
+                answer: readAnswer(root, q),
+              }),
+            }).catch(() => {}),
+          500,
+        );
+      });
     let expired = false;
     if (p.deadline) {
       const tick = async () => {
@@ -510,7 +559,9 @@ async function examPage(id) {
           try {
             const result = await request(`/api/exams/${id}/next`, {
               method: "POST",
-              body: JSON.stringify({ answer: readAnswer(root, q) }),
+              body: JSON.stringify({
+                answer: sectionIntro ? "" : readAnswer(root, q),
+              }),
             });
             if (result.complete)
               app.innerHTML =
@@ -558,6 +609,9 @@ async function examEditPage(id) {
   };
   const render = () => {
     app.innerHTML = `<div class="form-shell"><div class="editor-toolbar"><button class="ghost" id="editor-back">Back</button><div class="actions"><button class="ghost" id="discard">Discard Changes</button><button class="primary" id="save">Save Changes</button></div></div><div class="form-title"><div class="eyebrow">Examination editor</div><h1>${esc(f.name)}</h1><label>Description</label><textarea id="form-description">${esc(description)}</textarea></div><div id="sections">${schema.map((s, si) => `<section class="section editor-section" data-si="${si}"><input class="section-title" value="${esc(s.title)}" ${s.locked ? "disabled" : ""}><textarea class="section-desc" placeholder="Optional section description" ${s.locked ? "disabled" : ""}>${esc(s.description || "")}</textarea>${(s.questions || []).map((q, qi) => examEditorQuestion(q, si, qi)).join("")}<div class="editor-controls">${s.locked ? "" : '<span class="drag section-drag" draggable="true">⋮⋮ Drag Section</span><button class="ghost tiny delete-section">Delete Section</button>'}<button class="ghost tiny add-question">+ Add Question</button></div></section>`).join("")}</div><button class="ghost" id="add-section">+ Add Section</button></div>`;
+    document
+      .querySelectorAll(".section-desc")
+      .forEach((field) => (field.disabled = false));
     document
       .querySelector(".form-shell")
       .addEventListener("input", () => (dirty = true));
