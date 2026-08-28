@@ -4,7 +4,13 @@ const app = document.querySelector("#app"),
   modal = document.querySelector("#modal");
 let me = null;
 let permissionWatcher = null;
-const permissionFingerprint = (user) => JSON.stringify({ authenticated: Boolean(user?.authenticated), blocked: Boolean(user?.siteBlacklisted), rank: Number(user?.rank?.number || 0), roles: [...(user?.roles || [])].sort() });
+const permissionFingerprint = (user) =>
+  JSON.stringify({
+    authenticated: Boolean(user?.authenticated),
+    blocked: Boolean(user?.siteBlacklisted),
+    rank: Number(user?.rank?.number || 0),
+    roles: [...(user?.roles || [])].sort(),
+  });
 function watchPermissions() {
   if (permissionWatcher || !me?.authenticated) return;
   let fingerprint = permissionFingerprint(me);
@@ -391,22 +397,319 @@ function codeModal(confirm) {
   modal.classList.remove("hidden");
   modal.innerHTML = `<div class="dialog"><h2>Enter Examination Code</h2><p class="muted">Enter the six-digit code provided to you.</p><input id="exam-code" maxlength="6" inputmode="numeric" placeholder="000000"><div class="actions"><button class="ghost" id="cancel">Cancel</button><button class="primary" id="confirm">Start</button></div></div>`;
   modal.querySelector("#cancel").onclick = () => modal.classList.add("hidden");
-  modal.querySelector("#confirm").onclick = async () => { const code=modal.querySelector("#exam-code").value.trim(); try { await confirm(code); modal.classList.add("hidden"); } catch(e){ showNotice("Examination Not Started",e.message); } };
+  modal.querySelector("#confirm").onclick = async () => {
+    const code = modal.querySelector("#exam-code").value.trim();
+    try {
+      await confirm(code);
+      modal.classList.add("hidden");
+    } catch (e) {
+      showNotice("Examination Not Started", e.message);
+    }
+  };
 }
-async function exams(){
-  if(!me.authenticated){ location.assign("/"); return; }
-  const forms=await request("/api/exams");
-  app.innerHTML=`<div class="section-head"><div><div class="eyebrow">Authorized examinations</div><h1>Examinations</h1><p class="muted">Your available examinations and examination editing tools.</p></div></div>${forms.length?`<div class="application-grid">${forms.map(f=>`<article class="application-card" style="--team:${esc(f.team_color)}"><span class="tag">${esc(f.team_label)}</span><h3>${esc(f.name)}</h3><p class="muted">${f.schema.reduce((n,s)=>n+(s.questions?.filter(q=>!q.locked).length||0),0)} Questions</p><div class="card-meta"><b>CONJURES</b><div class="actions">${f.canEdit?`<a class="ghost" href="/exams/${f.id}/edit">Edit</a>`:""}${f.hasAccess?`<a class="primary" href="/exams/${f.id}">${f.started?"Continue":"Start"}</a>`:""}</div></div></article>`).join("")}</div>`:`<div class="empty-state"><div class="empty-icon">!</div><p>You do not have any exams.</p></div>`}`;
+async function exams() {
+  if (!me.authenticated) {
+    location.assign("/");
+    return;
+  }
+  const forms = await request("/api/exams");
+  app.innerHTML = `<div class="section-head"><div><div class="eyebrow">Authorized examinations</div><h1>Examinations</h1><p class="muted">Your available examinations and examination editing tools.</p></div></div>${forms.length ? `<div class="application-grid">${forms.map((f) => `<article class="application-card" style="--team:${esc(f.team_color)}"><span class="tag">${esc(f.team_label)}</span><h3>${esc(f.name)}</h3><p class="muted">${f.schema.reduce((n, s) => n + (s.questions?.filter((q) => !q.locked).length || 0), 0)} Questions</p><div class="card-meta"><b>CONJURES</b><div class="actions">${f.canEdit ? `<a class="ghost" href="/exams/${f.id}/edit">Edit</a>` : ""}${f.hasAccess ? `<a class="primary" href="/exams/${f.id}">${f.started ? "Continue" : "Start"}</a>` : ""}</div></div></article>`).join("")}</div>` : `<div class="empty-state"><div class="empty-icon">!</div><p>You do not have any exams.</p></div>`}`;
 }
-function readAnswer(root,q){ if(q.type==="checkboxes")return [...root.querySelectorAll("[data-q]:checked")].map(x=>x.value); const checked=root.querySelector("[data-q]:checked"); return checked?.value ?? root.querySelector("[data-q]")?.value ?? ""; }
-function fillChoices(root,q,value){ if(q.type==="checkboxes")root.querySelectorAll("[data-q]").forEach(x=>x.checked=(value||[]).includes(x.value)); else if(q.type==="multiple")root.querySelectorAll("[data-q]").forEach(x=>x.checked=x.value===value); else {const el=root.querySelector("[data-q]");if(el)el.value=value??"";} }
-async function examPage(id){
-  const f=await request(`/api/exams/${id}`); if(!f.hasAccess)throw new Error("You do not have access to take this examination.");
-  if(!f.started){app.innerHTML=`<div class="form-shell"><a class="back" href="/exams">← Back to Examinations</a><div class="form-title"><span class="tag" style="--team:${esc(f.team_color)}">${esc(f.team_label)}</span><h1>${esc(f.name)}</h1><p class="description">${esc(f.description||"")}</p></div><section class="section"><h2>Information</h2><div class="question"><label>Roblox Username</label><input value="${esc(me.roblox_username)}" disabled></div><div class="question"><label>Roblox ID</label><input value="${esc(me.roblox_user_id)}" disabled></div><div class="question"><label>Discord User ID</label><input value="${esc(me.discord_id)}" disabled></div><button class="primary" id="begin-exam">Start Examination</button></section></div>`;document.querySelector("#begin-exam").onclick=()=>codeModal(async code=>{await request(`/api/exams/${id}/unlock`,{method:"POST",body:JSON.stringify({code})});examPage(id);});return;}
-  const render=async()=>{let p;try{p=await request(`/api/exams/${id}/progress`);}catch(e){app.innerHTML=`<div class="success"><div class="check">✓</div><h1>Examination concluded</h1><p>${esc(e.message)}</p></div>`;return;}const q=p.question;app.innerHTML=`<div class="form-shell exam-runner"><div class="form-title"><span class="tag" style="--team:${esc(f.team_color)}">${esc(f.team_label)}</span><h1>${esc(f.name)}</h1><p class="muted">Question ${p.index+1} of ${p.total}</p>${p.deadline?`<div class="exam-timer" id="exam-timer"></div>`:""}</div><section class="section"><div class="question"><label>${esc(q.title)} ${q.required?'<span class="required">*</span>':""}</label>${q.description?`<small>${esc(q.description)}</small>`:""}${inputFor(q)}</div><div class="submit-row"><button class="primary" id="exam-next">${p.index+1===p.total?"Submit Examination":"Next"}</button></div></section></div>`;const root=document.querySelector(".exam-runner");fillChoices(root,q,p.draft);let saveTimer;root.addEventListener("input",()=>{clearTimeout(saveTimer);saveTimer=setTimeout(()=>request(`/api/exams/${id}/draft`,{method:"PATCH",body:JSON.stringify({questionId:q.id,answer:readAnswer(root,q)})}).catch(()=>{}),500)});let expired=false;if(p.deadline){const tick=async()=>{const left=Math.max(0,Math.ceil((new Date(p.deadline)-Date.now())/1000)),el=document.querySelector("#exam-timer");if(el)el.textContent=`Time Remaining: ${Math.floor(left/60)}:${String(left%60).padStart(2,"0")}`;if(!left&&!expired){expired=true;showNotice("Time Limit Exceeded","You exceeded the time limit. You are being moved to the next question.");setTimeout(render,250);return;}if(!expired)setTimeout(tick,1000)};tick();}document.querySelector("#exam-next").onclick=()=>showModal(p.index+1===p.total?"Submit Examination":"Continue Examination","Once you continue, you cannot return to this question or edit your answer.",async()=>{try{const result=await request(`/api/exams/${id}/next`,{method:"POST",body:JSON.stringify({answer:readAnswer(root,q)})});if(result.complete)app.innerHTML='<div class="success"><div class="check">✓</div><h1>Examination submitted</h1><p>Your examination has been successfully submitted.</p></div>';else render();}catch(e){showNotice("Unable to Continue",e.message);}});};await render();
+function readAnswer(root, q) {
+  if (q.type === "checkboxes")
+    return [...root.querySelectorAll("[data-q]:checked")].map((x) => x.value);
+  const checked = root.querySelector("[data-q]:checked");
+  return checked?.value ?? root.querySelector("[data-q]")?.value ?? "";
 }
-const examEditorQuestion=(q,si,qi)=>`<div class="question-editor" data-si="${si}" data-qi="${qi}"><div class="row"><input class="q-title" value="${esc(q.title)}" ${q.locked?"disabled":""}><select class="q-type" ${q.locked?"disabled":""}>${["short","long","multiple","checkboxes","dropdown"].map(t=>`<option value="${t}" ${q.type===t?"selected":""}>${{short:"Short answer",long:"Long answer",multiple:"Multiple choice",checkboxes:"Checkboxes",dropdown:"Dropdown"}[t]}</option>`).join("")}</select></div><input class="q-desc" placeholder="Optional question description" value="${esc(q.description||"")}" ${q.locked?"disabled":""}>${q.locked?"":`<input class="q-timer" type="number" min="0" max="86400" placeholder="Optional timer in seconds" value="${Number(q.timerSeconds||0)||""}">`}${["multiple","checkboxes","dropdown"].includes(q.type)?`<textarea class="q-options" placeholder="One option per line">${esc((q.options||[]).join("\n"))}</textarea>`:""}<div class="editor-controls"><label class="switch"><input class="q-required" type="checkbox" ${q.required?"checked":""} ${q.locked?"disabled":""}> Required</label>${q.locked?"":'<button type="button" class="ghost tiny delete-q">Delete</button>'}</div></div>`;
-async function examEditPage(id){const f=await request(`/api/exams/${id}`);if(!f.canEdit)throw new Error("You cannot edit this examination.");let schema=structuredClone(f.schema),description=f.description||"",dirty=false;const sync=()=>{description=document.querySelector("#form-description").value;document.querySelectorAll(".editor-section").forEach((el,si)=>{const s=schema[si];s.title=el.querySelector(".section-title").value;s.description=el.querySelector(".section-desc").value;el.querySelectorAll(".question-editor").forEach((qe,qi)=>{const q=s.questions[qi];q.title=qe.querySelector(".q-title").value;q.type=qe.querySelector(".q-type").value;q.description=qe.querySelector(".q-desc").value;q.required=qe.querySelector(".q-required").checked;q.timerSeconds=Number(qe.querySelector(".q-timer")?.value||0);const opts=qe.querySelector(".q-options");q.options=opts?opts.value.split("\n").map(x=>x.trim()).filter(Boolean):[];});});};const render=()=>{app.innerHTML=`<div class="form-shell"><div class="editor-toolbar"><button class="ghost" id="editor-back">Back</button><div class="actions"><button class="ghost" id="discard">Discard Changes</button><button class="primary" id="save">Save Changes</button></div></div><div class="form-title"><div class="eyebrow">Examination editor</div><h1>${esc(f.name)}</h1><label>Description</label><textarea id="form-description">${esc(description)}</textarea></div><div id="sections">${schema.map((s,si)=>`<section class="section editor-section"><input class="section-title" value="${esc(s.title)}" ${s.locked?"disabled":""}><textarea class="section-desc" placeholder="Optional section description" ${s.locked?"disabled":""}>${esc(s.description||"")}</textarea>${(s.questions||[]).map((q,qi)=>examEditorQuestion(q,si,qi)).join("")}<div class="editor-controls">${s.locked?"":'<button class="ghost tiny delete-section">Delete Section</button>'}<button class="ghost tiny add-question">+ Add Question</button></div></section>`).join("")}</div><button class="ghost" id="add-section">+ Add Section</button></div>`;document.querySelector(".form-shell").addEventListener("input",()=>dirty=true);document.querySelectorAll(".add-question").forEach((b,si)=>b.onclick=()=>{sync();schema[si].questions.push({id:uid(),title:"Untitled question",description:"",type:"short",required:false,options:[],timerSeconds:0});dirty=true;render();});document.querySelectorAll(".delete-q").forEach(b=>b.onclick=()=>{sync();const x=b.closest(".question-editor");schema[+x.dataset.si].questions.splice(+x.dataset.qi,1);dirty=true;render();});document.querySelectorAll(".delete-section").forEach((b,i)=>b.onclick=()=>{sync();schema.splice(i+1,1);dirty=true;render();});document.querySelector("#add-section").onclick=()=>{sync();schema.push({id:uid(),title:"Untitled Section",description:"",questions:[]});dirty=true;render();};document.querySelector("#editor-back").onclick=()=>dirty?showModal("Discard Changes","You have unsaved changes. Are you sure you would like to leave?",()=>location.assign("/exams")):location.assign("/exams");document.querySelector("#discard").onclick=()=>location.reload();document.querySelector("#save").onclick=async()=>{sync();try{await request(`/api/exams/${id}`,{method:"PUT",body:JSON.stringify({description,schema})});dirty=false;showNotice("Changes Saved","Your examination changes have been saved successfully.");}catch(e){showNotice("Changes Not Saved",e.message);}};};render();guardNavigation(()=>dirty,()=>dirty=false);window.onbeforeunload=()=>dirty?"You have unsaved changes.":undefined;}
+function fillChoices(root, q, value) {
+  if (q.type === "checkboxes")
+    root
+      .querySelectorAll("[data-q]")
+      .forEach((x) => (x.checked = (value || []).includes(x.value)));
+  else if (q.type === "multiple")
+    root
+      .querySelectorAll("[data-q]")
+      .forEach((x) => (x.checked = x.value === value));
+  else {
+    const el = root.querySelector("[data-q]");
+    if (el) el.value = value ?? "";
+  }
+}
+async function examPage(id) {
+  const f = await request(`/api/exams/${id}`);
+  if (!f.hasAccess)
+    throw new Error("You do not have access to take this examination.");
+  if (!f.started) {
+    app.innerHTML = `<div class="form-shell"><a class="back" href="/exams">← Back to Examinations</a><div class="form-title"><span class="tag" style="--team:${esc(f.team_color)}">${esc(f.team_label)}</span><h1>${esc(f.name)}</h1><p class="description">${esc(f.description || "")}</p></div><section class="section"><h2>Information</h2><div class="question"><label>Roblox Username</label><input value="${esc(me.roblox_username)}" disabled></div><div class="question"><label>Roblox ID</label><input value="${esc(me.roblox_user_id)}" disabled></div><div class="question"><label>Discord User ID</label><input value="${esc(me.discord_id)}" disabled></div><button class="primary" id="begin-exam">Start Examination</button></section></div>`;
+    document.querySelector("#begin-exam").onclick = () =>
+      codeModal(async (code) => {
+        await request(`/api/exams/${id}/unlock`, {
+          method: "POST",
+          body: JSON.stringify({ code }),
+        });
+        examPage(id);
+      });
+    return;
+  }
+  const render = async () => {
+    let p;
+    try {
+      p = await request(`/api/exams/${id}/progress`);
+    } catch (e) {
+      app.innerHTML = `<div class="success"><div class="check">✓</div><h1>Examination concluded</h1><p>${esc(e.message)}</p></div>`;
+      return;
+    }
+    const q = p.question;
+    app.innerHTML = `<div class="form-shell exam-runner"><div class="form-title"><span class="tag" style="--team:${esc(f.team_color)}">${esc(f.team_label)}</span><h1>${esc(f.name)}</h1><p class="muted">Question ${p.index + 1} of ${p.total}</p>${p.deadline ? `<div class="exam-timer" id="exam-timer"></div>` : ""}</div><section class="section"><div class="question"><label>${esc(q.title)} ${q.required ? '<span class="required">*</span>' : ""}</label>${q.description ? `<small>${esc(q.description)}</small>` : ""}${inputFor(q)}</div><div class="submit-row"><button class="primary" id="exam-next">${p.index + 1 === p.total ? "Submit Examination" : "Next"}</button></div></section></div>`;
+    const root = document.querySelector(".exam-runner");
+    fillChoices(root, q, p.draft);
+    let saveTimer;
+    root.addEventListener("input", () => {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(
+        () =>
+          request(`/api/exams/${id}/draft`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              questionId: q.id,
+              answer: readAnswer(root, q),
+            }),
+          }).catch(() => {}),
+        500,
+      );
+    });
+    let expired = false;
+    if (p.deadline) {
+      const tick = async () => {
+        if (!root.isConnected) return;
+        const left = Math.max(
+            0,
+            Math.ceil((new Date(p.deadline) - Date.now()) / 1000),
+          ),
+          el = document.querySelector("#exam-timer");
+        if (el)
+          el.textContent = `Time Remaining: ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+        if (!left && !expired) {
+          expired = true;
+          showNotice(
+            "Time Limit Exceeded",
+            "You exceeded the time limit. You are being moved to the next question.",
+          );
+          setTimeout(render, 250);
+          return;
+        }
+        if (!expired) setTimeout(tick, 1000);
+      };
+      tick();
+    }
+    document.querySelector("#exam-next").onclick = () =>
+      showModal(
+        p.index + 1 === p.total ? "Submit Examination" : "Continue Examination",
+        "Once you continue, you cannot return to this question or edit your answer.",
+        async () => {
+          try {
+            const result = await request(`/api/exams/${id}/next`, {
+              method: "POST",
+              body: JSON.stringify({ answer: readAnswer(root, q) }),
+            });
+            if (result.complete)
+              app.innerHTML =
+                '<div class="success"><div class="check">✓</div><h1>Examination submitted</h1><p>Your examination has been successfully submitted.</p></div>';
+            else render();
+          } catch (e) {
+            showNotice("Unable to Continue", e.message);
+          }
+        },
+      );
+  };
+  await render();
+}
+const examEditorQuestion = (q, si, qi) =>
+  `<div class="question-editor" data-si="${si}" data-qi="${qi}"><div class="row"><input class="q-title" value="${esc(q.title)}" ${q.locked ? "disabled" : ""}><select class="q-type" ${q.locked ? "disabled" : ""}>${["short", "long", "multiple", "checkboxes", "dropdown"].map((t) => `<option value="${t}" ${q.type === t ? "selected" : ""}>${{ short: "Short answer", long: "Long answer", multiple: "Multiple choice", checkboxes: "Checkboxes", dropdown: "Dropdown" }[t]}</option>`).join("")}</select></div><input class="q-desc" placeholder="Optional question description" value="${esc(q.description || "")}" ${q.locked ? "disabled" : ""}>${q.locked ? "" : `<input class="q-timer" type="number" min="0" max="86400" placeholder="Optional timer in seconds" value="${Number(q.timerSeconds || 0) || ""}">`}${["multiple", "checkboxes", "dropdown"].includes(q.type) ? `<textarea class="q-options" placeholder="One option per line">${esc((q.options || []).join("\n"))}</textarea>` : ""}<div class="editor-controls">${q.locked ? "" : '<span class="drag question-drag" draggable="true">⋮⋮ Drag</span>'}<label class="switch"><input class="q-required" type="checkbox" ${q.required ? "checked" : ""} ${q.locked ? "disabled" : ""}> Required</label>${q.locked ? "" : '<button type="button" class="ghost tiny duplicate-q">Duplicate</button><button type="button" class="ghost tiny delete-q">Delete</button>'}</div></div>`;
+async function examEditPage(id) {
+  const f = await request(`/api/exams/${id}`);
+  if (!f.canEdit) throw new Error("You cannot edit this examination.");
+  let schema = structuredClone(f.schema),
+    description = f.description || "",
+    dirty = false,
+    drag = null;
+  const sync = () => {
+    description = document.querySelector("#form-description").value;
+    document.querySelectorAll(".editor-section").forEach((el, si) => {
+      const s = schema[si];
+      s.title = el.querySelector(".section-title").value;
+      s.description = el.querySelector(".section-desc").value;
+      el.querySelectorAll(".question-editor").forEach((qe, qi) => {
+        const q = s.questions[qi];
+        q.title = qe.querySelector(".q-title").value;
+        q.type = qe.querySelector(".q-type").value;
+        q.description = qe.querySelector(".q-desc").value;
+        q.required = qe.querySelector(".q-required").checked;
+        q.timerSeconds = Number(qe.querySelector(".q-timer")?.value || 0);
+        const opts = qe.querySelector(".q-options");
+        q.options = opts
+          ? opts.value
+              .split("\n")
+              .map((x) => x.trim())
+              .filter(Boolean)
+          : [];
+      });
+    });
+  };
+  const render = () => {
+    app.innerHTML = `<div class="form-shell"><div class="editor-toolbar"><button class="ghost" id="editor-back">Back</button><div class="actions"><button class="ghost" id="discard">Discard Changes</button><button class="primary" id="save">Save Changes</button></div></div><div class="form-title"><div class="eyebrow">Examination editor</div><h1>${esc(f.name)}</h1><label>Description</label><textarea id="form-description">${esc(description)}</textarea></div><div id="sections">${schema.map((s, si) => `<section class="section editor-section" data-si="${si}"><input class="section-title" value="${esc(s.title)}" ${s.locked ? "disabled" : ""}><textarea class="section-desc" placeholder="Optional section description" ${s.locked ? "disabled" : ""}>${esc(s.description || "")}</textarea>${(s.questions || []).map((q, qi) => examEditorQuestion(q, si, qi)).join("")}<div class="editor-controls">${s.locked ? "" : '<span class="drag section-drag" draggable="true">⋮⋮ Drag Section</span><button class="ghost tiny delete-section">Delete Section</button>'}<button class="ghost tiny add-question">+ Add Question</button></div></section>`).join("")}</div><button class="ghost" id="add-section">+ Add Section</button></div>`;
+    document
+      .querySelector(".form-shell")
+      .addEventListener("input", () => (dirty = true));
+    document.querySelectorAll(".add-question").forEach(
+      (b, si) =>
+        (b.onclick = () => {
+          sync();
+          schema[si].questions.push({
+            id: uid(),
+            title: "Untitled question",
+            description: "",
+            type: "short",
+            required: false,
+            options: [],
+            timerSeconds: 0,
+          });
+          dirty = true;
+          render();
+        }),
+    );
+    document.querySelectorAll(".delete-q").forEach(
+      (b) =>
+        (b.onclick = () => {
+          sync();
+          const x = b.closest(".question-editor");
+          schema[+x.dataset.si].questions.splice(+x.dataset.qi, 1);
+          dirty = true;
+          render();
+        }),
+    );
+    document.querySelectorAll(".duplicate-q").forEach(
+      (b) =>
+        (b.onclick = () => {
+          sync();
+          const x = b.closest(".question-editor"),
+            copy = structuredClone(
+              schema[+x.dataset.si].questions[+x.dataset.qi],
+            );
+          copy.id = uid();
+          schema[+x.dataset.si].questions.splice(+x.dataset.qi + 1, 0, copy);
+          dirty = true;
+          render();
+        }),
+    );
+    document.querySelectorAll(".q-type").forEach(
+      (select) =>
+        (select.onchange = () => {
+          sync();
+          dirty = true;
+          render();
+        }),
+    );
+    document.querySelectorAll(".question-drag").forEach((handle) => {
+      const item = handle.closest(".question-editor");
+      handle.ondragstart = (event) => {
+        drag = { si: +item.dataset.si, qi: +item.dataset.qi };
+        event.stopPropagation();
+      };
+    });
+    document.querySelectorAll(".question-editor").forEach((item) => {
+      item.ondragover = (event) => event.preventDefault();
+      item.ondrop = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (drag?.qi == null) return;
+        sync();
+        const target = { si: +item.dataset.si, qi: +item.dataset.qi },
+          targetSection = schema[target.si];
+        if (targetSection.locked) return;
+        const [question] = schema[drag.si].questions.splice(drag.qi, 1);
+        schema[target.si].questions.splice(target.qi, 0, question);
+        drag = null;
+        dirty = true;
+        render();
+      };
+    });
+    document.querySelectorAll(".section-drag").forEach((handle) => {
+      const section = handle.closest(".editor-section");
+      handle.ondragstart = (event) => {
+        drag = { section: +section.dataset.si };
+        event.stopPropagation();
+      };
+    });
+    document.querySelectorAll(".editor-section").forEach((section) => {
+      section.ondragover = (event) => event.preventDefault();
+      section.ondrop = (event) => {
+        if (drag?.section == null) return;
+        event.preventDefault();
+        sync();
+        const to = +section.dataset.si;
+        if (schema[to].locked) return;
+        const [moved] = schema.splice(drag.section, 1);
+        schema.splice(to, 0, moved);
+        drag = null;
+        dirty = true;
+        render();
+      };
+    });
+    document.querySelectorAll(".delete-section").forEach(
+      (b, i) =>
+        (b.onclick = () => {
+          sync();
+          schema.splice(i + 1, 1);
+          dirty = true;
+          render();
+        }),
+    );
+    document.querySelector("#add-section").onclick = () => {
+      sync();
+      schema.push({
+        id: uid(),
+        title: "Untitled Section",
+        description: "",
+        questions: [],
+      });
+      dirty = true;
+      render();
+    };
+    document.querySelector("#editor-back").onclick = () =>
+      dirty
+        ? showModal(
+            "Discard Changes",
+            "You have unsaved changes. Are you sure you would like to leave?",
+            () => location.assign("/exams"),
+          )
+        : location.assign("/exams");
+    document.querySelector("#discard").onclick = () => location.reload();
+    document.querySelector("#save").onclick = async () => {
+      sync();
+      try {
+        await request(`/api/exams/${id}`, {
+          method: "PUT",
+          body: JSON.stringify({ description, schema }),
+        });
+        dirty = false;
+        showNotice(
+          "Changes Saved",
+          "Your examination changes have been saved successfully.",
+        );
+      } catch (e) {
+        showNotice("Changes Not Saved", e.message);
+      }
+    };
+  };
+  render();
+  guardNavigation(
+    () => dirty,
+    () => (dirty = false),
+  );
+  window.onbeforeunload = () =>
+    dirty ? "You have unsaved changes." : undefined;
+}
 async function route() {
   me = await request("/api/me");
   watchPermissions();
