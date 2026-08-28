@@ -60,6 +60,7 @@ const EXAMS = [
   ["social","Social Media Team Examination","SOCIAL MEDIA TEAM","#58d68d","1542853801180930129",["1536743365272404049","1536745953942315066"]],
   ["events","Events Team Examination","EVENTS TEAM","#ff9f43","1542853869258678273",["1536743365272404049","1536745884803661864"]],
 ];
+const EXAM_ROLE_IDS={"SR Team":"1520358345226321960","Hosting Lead":"1520360116459667566","Moderation Lead":"1520360168062451742","Relations Lead":"1520359445568290906","Events Lead":"1520360196579524711","Newsletter Lead":"1537363086162395146","Social Media Lead":"1520360171426152509","Hosting Executive":"1536642673006608424","Moderation Executive":"1536642685207580715","Relations Board":"1520359452669382799","Hosting Intern":"1520361131368120461","Moderation Intern":"1520361504354861176","Events Team":"1526961486617120818","Newsletter Team":"1537363092558717041","Social Media Team":"1526961462298542090"};
 
 app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
@@ -196,6 +197,7 @@ async function enrich(row) {
     avatar: member?.user?.avatar,
     headshot: await headshot(row.roblox_user_id),
     roles: [...names],
+    roleIds: member?.roles || [],
     rank,
   };
 }
@@ -224,9 +226,10 @@ function applyAllowed(form, p) {
   if (r.has("Social Media Team") && form.id === "social") return false;
   return true;
 }
-function examAdmin(p) { return p.rank.number >= 250 && new Set(p.roles || []).has("SR Team"); }
-function examCanEdit(form, p) { if (examAdmin(p)) return true; const r=new Set(p.roles||[]), rules={hr_hosting:"Hosting Lead",hr_moderation:"Moderation Lead",relations:"Relations Lead",hosting:"Hosting Lead",moderation:"Moderation Lead",events:"Events Lead",newsletter:"Newsletter Lead",social:"Social Media Lead"}; return r.has(rules[form.id]) && (["events","newsletter","social"].includes(form.id)||p.rank.number===52); }
-function examCanTake(form,p){if(examAdmin(p))return true;const r=new Set(p.roles||[]),rules={hr_hosting:[50,"Hosting Executive"],hr_moderation:[50,"Moderation Executive"],relations:[40,"Relations Board"],hosting:[30,"Hosting Intern"],moderation:[20,"Moderation Intern"],events:[null,"Events Team"],newsletter:[null,"Newsletter Team"],social:[null,"Social Media Team"]},rule=rules[form.id];return Boolean(rule&&r.has(rule[1])&&(rule[0]==null||p.rank.number===rule[0]));}
+function hasExamRole(p,name){return new Set(p.roles||[]).has(name)||new Set(p.roleIds||[]).has(EXAM_ROLE_IDS[name]);}
+function examAdmin(p) { return p.rank.number >= 250 && hasExamRole(p,"SR Team"); }
+function examCanEdit(form, p) { if (examAdmin(p)) return true; const rules={hr_hosting:"Hosting Lead",hr_moderation:"Moderation Lead",relations:"Relations Lead",hosting:"Hosting Lead",moderation:"Moderation Lead",events:"Events Lead",newsletter:"Newsletter Lead",social:"Social Media Lead"},role=rules[form.id]; return hasExamRole(p,role) && (["events","newsletter","social"].includes(form.id)||p.rank.number===52); }
+function examCanTake(form,p){if(examAdmin(p))return true;const rules={hr_hosting:[50,"Hosting Executive"],hr_moderation:[50,"Moderation Executive"],relations:[40,"Relations Board"],hosting:[30,"Hosting Intern"],moderation:[20,"Moderation Intern"],events:[null,"Events Team"],newsletter:[null,"Newsletter Team"],social:[null,"Social Media Team"]},rule=rules[form.id];return Boolean(rule&&hasExamRole(p,rule[1])&&(rule[0]==null||p.rank.number===rule[0]));}
 async function current(req) {
   const session = readToken(cookies(req).conjures_session);
   if (!session) return null;
