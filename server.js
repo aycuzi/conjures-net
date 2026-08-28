@@ -227,7 +227,7 @@ function applyAllowed(form, p) {
   return true;
 }
 function hasExamRole(p,name){return new Set(p.roles||[]).has(name)||new Set(p.roleIds||[]).has(EXAM_ROLE_IDS[name]);}
-function examAdmin(p) { return p.rank.number >= 250 && hasExamRole(p,"SR Team"); }
+function examAdmin(p) { return p.rank.number >= 250; }
 function examCanEdit(form, p) { if (examAdmin(p)) return true; const rules={hr_hosting:"Hosting Lead",hr_moderation:"Moderation Lead",relations:"Relations Lead",hosting:"Hosting Lead",moderation:"Moderation Lead",events:"Events Lead",newsletter:"Newsletter Lead",social:"Social Media Lead"},role=rules[form.id]; return hasExamRole(p,role) && (["events","newsletter","social"].includes(form.id)||p.rank.number===52); }
 function examCanTake(form,p){if(examAdmin(p))return true;const rules={hr_hosting:[50,"Hosting Executive"],hr_moderation:[50,"Moderation Executive"],relations:[40,"Relations Board"],hosting:[30,"Hosting Intern"],moderation:[20,"Moderation Intern"],events:[null,"Events Team"],newsletter:[null,"Newsletter Team"],social:[null,"Social Media Team"]},rule=rules[form.id];return Boolean(rule&&hasExamRole(p,rule[1])&&(rule[0]==null||p.rank.number===rule[0]));}
 async function current(req) {
