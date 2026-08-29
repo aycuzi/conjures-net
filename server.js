@@ -1504,6 +1504,7 @@ app.get(
     "/applications",
     "/applications/:id",
     "/applications/:id/edit",
+    "/customroles",
     "/exams",
     "/exams/:id",
     "/exams/:id/edit",
