@@ -460,7 +460,18 @@ async function exams() {
     return;
   }
   const forms = await request("/api/exams");
-  app.innerHTML = `<div class="section-head"><div><div class="eyebrow">Authorized examinations</div><h1>Examinations</h1><p class="muted">Your available examinations and examination editing tools.</p></div></div>${forms.length ? `<div class="application-grid">${forms.map((f) => `<article class="application-card" style="--team:${esc(f.team_color)}"><span class="tag">${esc(f.team_label)}</span><h3>${esc(f.name)}</h3><p class="muted">${f.schema.reduce((n, s) => n + (s.questions?.filter((q) => !q.locked).length || 0), 0)} Questions</p><div class="card-meta"><b>CONJURES</b><div class="actions">${f.canEdit ? `<a class="ghost" href="/exams/${f.id}/edit">Edit</a>` : ""}${f.hasAccess ? `<a class="primary" href="/exams/${f.id}">${f.started ? "Continue" : "Start"}</a>` : ""}</div></div></article>`).join("")}</div>` : `<div class="empty-state"><div class="empty-icon">!</div><p>You do not have any exams.</p></div>`}`;
+  const countQuestions = (form) =>
+    form.schema.reduce((total, section) => {
+      const available =
+        section.questions?.filter((question) => !question.locked).length || 0;
+      return (
+        total +
+        (section.questionBank
+          ? Math.min(Number(section.questionLimit || available), available)
+          : available)
+      );
+    }, 0);
+  app.innerHTML = `<div class="section-head"><div><div class="eyebrow">Authorized examinations</div><h1>Examinations</h1><p class="muted">Your available examinations and examination editing tools.</p></div></div>${forms.length ? `<div class="application-grid">${forms.map((f) => `<article class="application-card" style="--team:${esc(f.team_color)}"><span class="tag">${esc(f.team_label)}</span><h3>${esc(f.name)}</h3><p class="muted">${countQuestions(f)} Questions</p><div class="card-meta"><b>CONJURES</b><div class="actions">${f.canEdit ? `<a class="ghost" href="/exams/${f.id}/edit">Edit</a>` : ""}${f.hasAccess ? `<a class="primary" href="/exams/${f.id}">${f.started ? "Continue" : "Start"}</a>` : ""}</div></div></article>`).join("")}</div>` : `<div class="empty-state"><div class="empty-icon">!</div><p>You do not have any exams.</p></div>`}`;
 }
 function readAnswer(root, q) {
   if (q.type === "checkboxes")
@@ -575,8 +586,8 @@ async function examPage(id) {
   };
   await render();
 }
-const examEditorQuestion = (q, si, qi) =>
-  `<div class="question-editor" data-si="${si}" data-qi="${qi}"><div class="row"><input class="q-title" value="${esc(q.title)}" ${q.locked ? "disabled" : ""}><select class="q-type" ${q.locked ? "disabled" : ""}>${["short", "long", "multiple", "checkboxes", "dropdown"].map((t) => `<option value="${t}" ${q.type === t ? "selected" : ""}>${{ short: "Short answer", long: "Long answer", multiple: "Multiple choice", checkboxes: "Checkboxes", dropdown: "Dropdown" }[t]}</option>`).join("")}</select></div><input class="q-desc" placeholder="Optional question description" value="${esc(q.description || "")}" ${q.locked ? "disabled" : ""}>${q.locked ? "" : `<input class="q-timer" type="number" min="0" max="86400" placeholder="Optional timer in seconds" value="${Number(q.timerSeconds || 0) || ""}">`}${["multiple", "checkboxes", "dropdown"].includes(q.type) ? `<textarea class="q-options" placeholder="One option per line">${esc((q.options || []).join("\n"))}</textarea>` : ""}<div class="editor-controls">${q.locked ? "" : '<span class="drag question-drag" draggable="true">⋮⋮ Drag</span>'}<label class="switch"><input class="q-required" type="checkbox" ${q.required ? "checked" : ""} ${q.locked ? "disabled" : ""}> Required</label>${q.locked ? "" : '<button type="button" class="ghost tiny duplicate-q">Duplicate</button><button type="button" class="ghost tiny delete-q">Delete</button>'}</div></div>`;
+const examEditorQuestion = (q, si, qi, questionBank) =>
+  `<div class="question-editor" data-si="${si}" data-qi="${qi}"><div class="row"><input class="q-title" value="${esc(q.title)}" ${q.locked ? "disabled" : ""}><select class="q-type" ${q.locked ? "disabled" : ""}>${["short", "long", "multiple", "checkboxes", "dropdown"].map((t) => `<option value="${t}" ${q.type === t ? "selected" : ""}>${{ short: "Short answer", long: "Long answer", multiple: "Multiple choice", checkboxes: "Checkboxes", dropdown: "Dropdown" }[t]}</option>`).join("")}</select></div><input class="q-desc" placeholder="Optional question description" value="${esc(q.description || "")}" ${q.locked ? "disabled" : ""}>${q.locked ? "" : `<input class="q-timer" type="number" min="0" max="86400" placeholder="Optional timer in seconds" value="${Number(q.timerSeconds || 0) || ""}">`}${["multiple", "checkboxes", "dropdown"].includes(q.type) ? `<textarea class="q-options" placeholder="One option per line">${esc((q.options || []).join("\n"))}</textarea>` : ""}<div class="editor-controls">${q.locked ? "" : '<span class="drag question-drag" draggable="true">⋮⋮ Drag</span>'}<label class="switch"><input class="q-required" type="checkbox" ${q.required ? "checked" : ""} ${q.locked ? "disabled" : ""}> Required Answer</label>${questionBank && !q.locked ? `<label class="switch"><input class="q-always" type="checkbox" ${q.alwaysInclude ? "checked" : ""}> Always Include</label>` : ""}${q.locked ? "" : '<button type="button" class="ghost tiny duplicate-q">Duplicate</button><button type="button" class="ghost tiny delete-q">Delete</button>'}</div></div>`;
 async function examEditPage(id) {
   const f = await request(`/api/exams/${id}`);
   if (!f.canEdit) throw new Error("You cannot edit this examination.");
@@ -590,6 +601,10 @@ async function examEditPage(id) {
       const s = schema[si];
       s.title = el.querySelector(".section-title").value;
       s.description = el.querySelector(".section-desc").value;
+      s.questionBank = Boolean(el.querySelector(".section-bank")?.checked);
+      s.questionLimit = s.questionBank
+        ? Number(el.querySelector(".section-limit")?.value || 0)
+        : 0;
       el.querySelectorAll(".question-editor").forEach((qe, qi) => {
         const q = s.questions[qi];
         q.title = qe.querySelector(".q-title").value;
@@ -597,6 +612,7 @@ async function examEditPage(id) {
         q.description = qe.querySelector(".q-desc").value;
         q.required = qe.querySelector(".q-required").checked;
         q.timerSeconds = Number(qe.querySelector(".q-timer")?.value || 0);
+        q.alwaysInclude = Boolean(qe.querySelector(".q-always")?.checked);
         const opts = qe.querySelector(".q-options");
         q.options = opts
           ? opts.value
@@ -608,7 +624,7 @@ async function examEditPage(id) {
     });
   };
   const render = () => {
-    app.innerHTML = `<div class="form-shell"><div class="editor-toolbar"><button class="ghost" id="editor-back">Back</button><div class="actions"><button class="ghost" id="discard">Discard Changes</button><button class="primary" id="save">Save Changes</button></div></div><div class="form-title"><div class="eyebrow">Examination editor</div><h1>${esc(f.name)}</h1><label>Description</label><textarea id="form-description">${esc(description)}</textarea></div><div id="sections">${schema.map((s, si) => `<section class="section editor-section" data-si="${si}"><input class="section-title" value="${esc(s.title)}" ${s.locked ? "disabled" : ""}><textarea class="section-desc" placeholder="Optional section description" ${s.locked ? "disabled" : ""}>${esc(s.description || "")}</textarea>${(s.questions || []).map((q, qi) => examEditorQuestion(q, si, qi)).join("")}<div class="editor-controls">${s.locked ? "" : '<span class="drag section-drag" draggable="true">⋮⋮ Drag Section</span><button class="ghost tiny delete-section">Delete Section</button>'}<button class="ghost tiny add-question">+ Add Question</button></div></section>`).join("")}</div><button class="ghost" id="add-section">+ Add Section</button></div>`;
+    app.innerHTML = `<div class="form-shell"><div class="editor-toolbar"><button class="ghost" id="editor-back">Back</button><div class="actions"><button class="ghost" id="discard">Discard Changes</button><button class="primary" id="save">Save Changes</button></div></div><div class="form-title"><div class="eyebrow">Examination editor</div><h1>${esc(f.name)}</h1><label>Description</label><textarea id="form-description">${esc(description)}</textarea></div><div id="sections">${schema.map((s, si) => `<section class="section editor-section" data-si="${si}"><input class="section-title" value="${esc(s.title)}" ${s.locked ? "disabled" : ""}><textarea class="section-desc" placeholder="Optional section description" ${s.locked ? "disabled" : ""}>${esc(s.description || "")}</textarea>${s.locked ? "" : `<div class="bank-settings"><label class="switch"><input class="section-bank" type="checkbox" ${s.questionBank ? "checked" : ""}> Enable Question Bank</label>${s.questionBank ? `<label>Question Limit<input class="section-limit" type="number" min="1" max="${(s.questions || []).length}" value="${Number(s.questionLimit || 0) || ""}" placeholder="Number of randomized questions"></label>` : ""}</div>`}${(s.questions || []).map((q, qi) => examEditorQuestion(q, si, qi, Boolean(s.questionBank))).join("")}<div class="editor-controls">${s.locked ? "" : '<span class="drag section-drag" draggable="true">⋮⋮ Drag Section</span><button class="ghost tiny delete-section">Delete Section</button>'}<button class="ghost tiny add-question">+ Add Question</button></div></section>`).join("")}</div><button class="ghost" id="add-section">+ Add Section</button></div>`;
     document
       .querySelectorAll(".section-desc")
       .forEach((field) => (field.disabled = false));
@@ -659,6 +675,14 @@ async function examEditPage(id) {
     document.querySelectorAll(".q-type").forEach(
       (select) =>
         (select.onchange = () => {
+          sync();
+          dirty = true;
+          render();
+        }),
+    );
+    document.querySelectorAll(".section-bank").forEach(
+      (toggle) =>
+        (toggle.onchange = () => {
           sync();
           dirty = true;
           render();
@@ -725,6 +749,8 @@ async function examEditPage(id) {
         id: uid(),
         title: "Untitled Section",
         description: "",
+        questionBank: false,
+        questionLimit: 0,
         questions: [],
       });
       dirty = true;

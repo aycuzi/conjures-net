@@ -445,6 +445,24 @@ textarea {
 .question-editor .q-options {
   margin-top: 10px;
 }
+.bank-settings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.65fr);
+  align-items: end;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #0e0e12;
+}
+.bank-settings > label:not(.switch) {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
 .question-editor .row {
   display: grid;
   grid-template-columns: 1fr 180px;

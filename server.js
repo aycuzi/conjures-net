@@ -563,23 +563,65 @@ function examQuestions(form) {
     (section.questions || []).filter((q) => !q.locked),
   );
 }
-function examSteps(form) {
+function shuffle(items) {
+  const output = [...items];
+  for (let index = output.length - 1; index > 0; index--) {
+    const swap = crypto.randomInt(index + 1);
+    [output[index], output[swap]] = [output[swap], output[index]];
+  }
+  return output;
+}
+function buildExamPlan(form) {
   const sections = JSON.parse(form.schema_json || "[]"),
     steps = [];
   for (const section of sections) {
-    if (!section.locked)
-      steps.push({
-        id: `section:${section.id}`,
-        type: "section_intro",
-        title: section.title,
-        description: section.description || "",
-        required: false,
-        timerSeconds: 0,
-      });
-    for (const question of section.questions || [])
-      if (!question.locked) steps.push(question);
+    if (section.locked) continue;
+    steps.push({
+      id: `section:${section.id}`,
+      type: "section_intro",
+      title: section.title,
+      description: section.description || "",
+      required: false,
+      timerSeconds: 0,
+    });
+    const questions = (section.questions || []).filter(
+      (question) => !question.locked,
+    );
+    if (!section.questionBank) {
+      steps.push(...questions);
+      continue;
+    }
+    const always = questions.filter((question) => question.alwaysInclude),
+      optional = shuffle(
+        questions.filter((question) => !question.alwaysInclude),
+      ),
+      configured = Math.max(0, Math.floor(Number(section.questionLimit || 0))),
+      limit = configured || questions.length,
+      selected = [
+        ...always,
+        ...optional.slice(0, Math.max(0, limit - always.length)),
+      ];
+    steps.push(...shuffle(selected));
   }
   return steps;
+}
+function examSteps(form, access) {
+  if (access?.exam_plan_json) {
+    try {
+      return JSON.parse(access.exam_plan_json);
+    } catch {}
+  }
+  return buildExamPlan(form);
+}
+async function ensureExamPlan(access, form) {
+  if (access.exam_plan_json) return access;
+  access.exam_plan_json = JSON.stringify(buildExamPlan(form));
+  access.updated_at = new Date().toISOString();
+  await api("/tables/exam_access", {
+    method: "POST",
+    body: JSON.stringify(access),
+  });
+  return access;
 }
 function formatElapsed(seconds) {
   const value = Math.max(0, Math.floor(seconds || 0)),
@@ -594,7 +636,9 @@ async function deliverExam(access, form, incomplete = false) {
   try {
     const answers = JSON.parse(access.answers_json || "{}"),
       timings = JSON.parse(access.timings_json || "{}"),
-      questions = examQuestions(form),
+      questions = examSteps(form, access).filter(
+        (step) => step.type !== "section_intro",
+      ),
       thumbnail = await headshot(access.roblox_user_id),
       fields = [
         {
@@ -936,7 +980,8 @@ async function normalizeExamAccess(access, form) {
     return null;
   }
   if (!access.started_at) return access;
-  const steps = examSteps(form),
+  access = await ensureExamPlan(access, form);
+  const steps = examSteps(form, access),
     answers = JSON.parse(access.answers_json || "{}"),
     timings = JSON.parse(access.timings_json || "{}"),
     original = Number(access.current_question || 0);
@@ -1048,17 +1093,39 @@ app.put("/api/exams/:id", requireUser, async (req, res) => {
       return res
         .status(400)
         .json({ error: "The Information section is required." });
-    for (const section of schema)
+    for (const section of schema) {
+      const available = (section.questions || []).filter(
+        (question) => !question.locked,
+      );
+      section.questionBank = Boolean(section.questionBank && !section.locked);
+      section.questionLimit = section.questionBank
+        ? Math.floor(Number(section.questionLimit || 0))
+        : 0;
+      if (
+        section.questionBank &&
+        (section.questionLimit < 1 || section.questionLimit > available.length)
+      )
+        return res.status(400).json({
+          error: `The question limit for ${section.title} must be between 1 and ${available.length}.`,
+        });
+      if (
+        section.questionBank &&
+        available.filter((question) => question.alwaysInclude).length >
+          section.questionLimit
+      )
+        return res.status(400).json({
+          error: `${section.title} has more required bank questions than its question limit.`,
+        });
       for (const q of section.questions || []) {
         const timer = Number(q.timerSeconds || 0);
         if (timer < 0 || timer > 86400)
-          return res
-            .status(400)
-            .json({
-              error: "Question timers must be between 1 and 86,400 seconds.",
-            });
+          return res.status(400).json({
+            error: "Question timers must be between 1 and 86,400 seconds.",
+          });
         q.timerSeconds = timer || 0;
+        q.alwaysInclude = Boolean(section.questionBank && q.alwaysInclude);
       }
+    }
     await api("/tables/exam_forms", {
       method: "POST",
       body: JSON.stringify({
@@ -1087,11 +1154,9 @@ app.post("/api/exams/:id/unlock", requireUser, async (req, res) => {
         .status(404)
         .json({ error: "No active examination was found." });
     if (!examCanTake(form, req.user))
-      return res
-        .status(403)
-        .json({
-          error: "You no longer meet the requirements for this examination.",
-        });
+      return res.status(403).json({
+        error: "You no longer meet the requirements for this examination.",
+      });
     if (new Date(access.expires_at) <= new Date()) {
       await deliverExam(access, form, true);
       return res
@@ -1108,6 +1173,7 @@ app.post("/api/exams/:id/unlock", requireUser, async (req, res) => {
         .json({ error: "The examination code is invalid." });
     if (!access.started_at) {
       const now = new Date().toISOString();
+      access.exam_plan_json = JSON.stringify(buildExamPlan(form));
       access.started_at = now;
       access.question_started_at = now;
       access.status = "issued";
@@ -1138,7 +1204,7 @@ app.get("/api/exams/:id/progress", requireUser, async (req, res) => {
     if (!access)
       return res.status(410).json({ error: "This examination has concluded." });
     if (!access.started_at) return res.json({ locked: true });
-    const steps = examSteps(form),
+    const steps = examSteps(form, access),
       q = steps[access.current_question],
       answers = JSON.parse(access.answers_json || "{}"),
       limit = Number(q.timerSeconds || 0);
@@ -1174,7 +1240,7 @@ app.patch("/api/exams/:id/draft", requireUser, async (req, res) => {
     access = await normalizeExamAccess(access, form);
     if (!access)
       return res.status(410).json({ error: "This examination has concluded." });
-    const q = examSteps(form)[access.current_question];
+    const q = examSteps(form, access)[access.current_question];
     if (q.type === "section_intro" || req.body.questionId !== q.id)
       return res.json({ ok: true, advanced: true });
     const answers = JSON.parse(access.answers_json || "{}");
@@ -1205,7 +1271,7 @@ app.post("/api/exams/:id/next", requireUser, async (req, res) => {
     access = await normalizeExamAccess(access, form);
     if (!access)
       return res.status(410).json({ error: "This examination has concluded." });
-    const steps = examSteps(form),
+    const steps = examSteps(form, access),
       q = steps[access.current_question],
       answer = req.body.answer,
       answers = JSON.parse(access.answers_json || "{}"),
