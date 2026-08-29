@@ -141,7 +141,8 @@ async function applications() {
 async function loadPayPal(clientId, createOrder, onApprove) {
   if (!window.paypal) await new Promise((resolve,reject)=>{const s=document.createElement("script");s.src=`https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(clientId)}&currency=USD&components=buttons&disable-funding=venmo`;s.onload=resolve;s.onerror=()=>reject(new Error("PayPal could not be loaded."));document.head.appendChild(s);});
   document.querySelector("#paypal-buttons").innerHTML="";
-  await window.paypal.Buttons({style:{layout:"vertical",shape:"rect",label:"paypal"},createOrder,onApprove,onCancel:()=>showNotice("Purchase Cancelled","No payment was taken."),onError:()=>showNotice("Payment Error","PayPal could not complete the purchase. Please try again.")}).render("#paypal-buttons");
+  let checkoutError=null;
+  await window.paypal.Buttons({style:{layout:"vertical",shape:"rect",label:"paypal"},createOrder:async()=>{try{checkoutError=null;return await createOrder();}catch(error){checkoutError=error;throw error;}},onApprove,onCancel:()=>showNotice("Purchase Cancelled","No payment was taken."),onError:()=>showNotice("Payment Error",checkoutError?.message||"PayPal could not complete the purchase. Please try again.")}).render("#paypal-buttons");
 }
 async function customRoles() {
   const state=await request("/api/customroles");
