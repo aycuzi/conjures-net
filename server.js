@@ -11,6 +11,8 @@ const API_URL = String(
 ).replace(/\/$/, "");
 const GUILD_ID = process.env.DISCORD_GUILD_ID || "1517112878862176256";
 const GROUP_ID = process.env.ROBLOX_GROUP_ID || "12287375";
+const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID || "BAA1j7yq_OhzZfTA4ncLzXBRJ8kZvEa03J2SIU81G0qghzdcGc_BATtDTbDSJUu4WRfykOZdIIboPGPq1o";
+const PAYPAL_BASE = process.env.PAYPAL_ENVIRONMENT === "sandbox" ? "https://api-m.sandbox.paypal.com" : "https://api-m.paypal.com";
 const apiHeaders = {
   "x-api-key": process.env.CONJURES_API_KEY || "",
   "content-type": "application/json",
@@ -472,6 +474,28 @@ async function requireUser(req, res, next) {
   req.user = user;
   next();
 }
+async function paypalToken() {
+  if (!process.env.PAYPAL_CLIENT_SECRET) throw new Error("PayPal checkout is not configured yet.");
+  const response = await fetch(`${PAYPAL_BASE}/v1/oauth2/token`, { method: "POST", headers: { authorization: `Basic ${Buffer.from(`${PAYPAL_CLIENT_ID}:${process.env.PAYPAL_CLIENT_SECRET}`).toString("base64")}`, "content-type": "application/x-www-form-urlencoded" }, body: "grant_type=client_credentials" });
+  if (!response.ok) throw new Error("PayPal authentication failed.");
+  return (await response.json()).access_token;
+}
+async function paypal(route, options = {}) {
+  const response = await fetch(`${PAYPAL_BASE}${route}`, { ...options, headers: { authorization: `Bearer ${await paypalToken()}`, "content-type": "application/json", ...(options.headers || {}) } });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.message || "PayPal could not complete this request.");
+  return body;
+}
+async function resolveCustomRoleRecipient(input) {
+  const value = String(input || "").trim(); let row = null;
+  if (/^\d+$/.test(value)) row = await verification({ roblox_user_id: value }) || await verification({ discord_id: value });
+  else if (/^[A-Za-z0-9_]{3,20}$/.test(value)) {
+    const rr = await fetch("https://users.roblox.com/v1/usernames/users", { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({usernames:[value],excludeBannedUsers:false}) });
+    const found = rr.ok ? (await rr.json()).data?.[0] : null;
+    if (found) row = await verification({ roblox_user_id: String(found.id) });
+  }
+  return row;
+}
 async function applicationState(user, applicationId) {
   if (!user) return { state: null, daysRemaining: 0 };
   const [blocked, past] = await Promise.all([
@@ -715,6 +739,11 @@ async function deliverExam(access, form, incomplete = false) {
     examDeliveryLocks.delete(access.id);
   }
 }
+
+app.get("/api/customroles", async (req,res)=>{try{const user=await current(req),roles=user?await api(`/tables/custom_roles?roblox_user_id=${encodeURIComponent(user.roblox_user_id)}&limit=1`):[];res.json({price:"30.00",currency:"USD",paypalClientId:PAYPAL_CLIENT_ID,authenticated:Boolean(user&&!user.siteBlacklisted),hasRole:Boolean(roles[0]),role:roles[0]||null,user:user&&!user.siteBlacklisted?user:null});}catch(e){res.status(500).json({error:"Custom roles could not be loaded."});}});
+app.post("/api/customroles/check-gift",requireUser,async(req,res)=>{try{const target=await resolveCustomRoleRecipient(req.body?.target);if(!target)return res.status(404).json({error:"That account is not verified through CONJURES."});const status=await api(`/custom-roles/eligibility/${encodeURIComponent(target.roblox_user_id)}`);res.json({eligible:status.eligible,robloxUsername:target.roblox_username,robloxId:target.roblox_user_id,discordId:target.discord_id,reason:status.hasRole?"This user already has a custom role.":status.reserved?"A custom role purchase is already in progress for this user.":status.eligible?null:"This user is not eligible."});}catch(e){res.status(500).json({error:e.message});}});
+app.post("/api/customroles/order",requireUser,async(req,res)=>{try{const gift=Boolean(req.body?.gift);let recipient=req.user;if(gift){recipient=await resolveCustomRoleRecipient(req.body?.target);if(!recipient)return res.status(404).json({error:"That account is not verified through CONJURES."});}const reservation=await api("/custom-roles/reserve",{method:"POST",body:JSON.stringify({id:id(),purchaserRobloxUserId:req.user.roblox_user_id,purchaserDiscordId:req.user.discord_id,recipientRobloxUserId:recipient.roblox_user_id})});const order=await paypal("/v2/checkout/orders",{method:"POST",headers:{"PayPal-Request-Id":reservation.id},body:JSON.stringify({intent:"CAPTURE",purchase_units:[{reference_id:reservation.id,custom_id:reservation.id,description:`CONJURES Custom Role for ${recipient.roblox_username} (${recipient.roblox_user_id})`,amount:{currency_code:"USD",value:"30.00"}}],application_context:{brand_name:"CONJURES",user_action:"PAY_NOW",shipping_preference:"NO_SHIPPING"}})});await api("/custom-roles/order-created",{method:"POST",body:JSON.stringify({id:reservation.id,orderId:order.id})});res.json({id:order.id,intentId:reservation.id});}catch(e){console.error("[customroles] create order failed",e.message);res.status(409).json({error:e.message.includes("recipient_")?"This user is not currently eligible for a custom role.":e.message});}});
+app.post("/api/customroles/order/:orderId/capture",requireUser,async(req,res)=>{try{const rows=await api(`/tables/custom_role_purchase_intents?paypal_order_id=${encodeURIComponent(req.params.orderId)}&purchaser_discord_id=${encodeURIComponent(req.user.discord_id)}&limit=1`),intent=rows[0];if(!intent)return res.status(404).json({error:"Purchase not found."});const capture=await paypal(`/v2/checkout/orders/${encodeURIComponent(req.params.orderId)}/capture`,{method:"POST",headers:{"PayPal-Request-Id":`${intent.id}-capture`},body:"{}"});const unit=capture.purchase_units?.[0],payment=unit?.payments?.captures?.[0];if(capture.status!=="COMPLETED"||payment?.status!=="COMPLETED"||payment.amount?.currency_code!=="USD"||payment.amount?.value!=="30.00"||unit.reference_id!==intent.id)return res.status(409).json({error:"PayPal did not confirm the expected completed $30.00 USD payment."});await api("/custom-roles/paid",{method:"POST",body:JSON.stringify({id:intent.id,orderId:capture.id,captureId:payment.id,purchaserRobloxUsername:req.user.roblox_username})});res.json({ok:true});}catch(e){console.error("[customroles] capture failed",e.message);res.status(409).json({error:e.message});}});
 
 app.get("/health", (_q, res) =>
   res.json({ ok: true, service: "conjures-net" }),
