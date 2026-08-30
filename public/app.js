@@ -838,7 +838,7 @@ async function route() {
     if (p === "/dashboard") return dashboard();
     if (p === "/applications") return applications();
     if (p === "/customroles") return customRoles();
-    if (p === "/guides") return guides();
+    if (p === "/guides") {if(!me.authenticated){app.innerHTML='<div class="success"><h1>Guides</h1><p class="muted">Please log in with your verified CONJURES account to access Guides.</p><a class="primary" href="/">Log In</a></div>';return;}return guides();}
     if (p === "/exams") return exams();
     if (p === "/terms" || p === "/privacy") return legal(p.slice(1));
     const m = p.match(/^\/applications\/([^/]+)(\/edit)?$/);
@@ -846,7 +846,7 @@ async function route() {
     const e = p.match(/^\/exams\/([^/]+)(\/edit)?$/);
     if (e) return e[2] ? examEditPage(e[1]) : examPage(e[1]);
     const g = p.match(/^\/guides\/([^/]+)(?:\/([^/]+))?$/);
-    if(g)return g[2]?guideDocument(g[1],g[2]):guideFolder(g[1]);
+    if(g){if(!me.authenticated){app.innerHTML='<div class="success"><h1>Guides</h1><p class="muted">Please log in with your verified CONJURES account to access Guides.</p><a class="primary" href="/">Log In</a></div>';return;}return g[2]?guideDocument(g[1],g[2]):guideFolder(g[1]);}
     return applications();
   } catch (e) {
     app.innerHTML = `<div class="success"><h1>Something went wrong</h1><p class="muted">${esc(e.message)}</p></div>`;
