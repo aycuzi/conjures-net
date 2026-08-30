@@ -171,7 +171,147 @@ function guideToolbar(){return `<div class="guide-toolbar"><button data-command=
 async function guideDocument(folderId,docId){const doc=await request(`/api/guides/folders/${folderId}/documents/${docId}`);let editing=false,dirty=false,saving=false,autosave=null,lastSaved=doc.content_html||"<p></p>";const render=()=>{app.innerHTML=`<div class="guide-breadcrumb"><a href="/guides">Guides</a><span>›</span><a href="/guides/${doc.folder.id}">${esc(doc.folder.name)}</a><span>›</span><b>${esc(doc.title)}</b></div><article class="guide-document"><div class="guide-document-head"><div><div class="eyebrow">INTERNAL GUIDE</div><h1>${esc(doc.title)}</h1><p class="muted" id="last-updated">Last Updated: ${dateOnly(doc.updated_at)}</p></div>${doc.abilities.edit?`<button class="primary" id="toggle-edit">${editing?"Editing":"Edit"}</button>`:""}</div>${editing?guideToolbar():""}<div id="guide-content" class="guide-content ${editing?"is-editing":""}" ${editing?'contenteditable="true" spellcheck="true"':""}>${lastSaved}</div>${editing?'<div class="guide-savebar"><span class="muted" id="save-status">All changes saved</span><div class="actions"><button class="ghost" id="discard-guide">Discard Changes</button><button class="primary" id="save-guide">Save Changes</button></div></div>':""}</article>`;document.querySelector("#toggle-edit")?.addEventListener("click",()=>{if(!editing){editing=true;render();wireEditor();}});};
  const save=async(silent=false)=>{if(!dirty||saving)return;saving=true;const status=document.querySelector("#save-status");if(status)status.textContent="Saving…";try{const html=document.querySelector("#guide-content").innerHTML,result=await request(`/api/guides/folders/${folderId}/documents/${docId}`,{method:"PATCH",body:JSON.stringify({contentHtml:html})});lastSaved=result.content_html||html;doc.updated_at=result.updated_at;dirty=false;if(status)status.textContent="Saved just now";if(!silent)showNotice("Changes Saved","Your guide changes have been saved successfully.");}catch(e){if(status)status.textContent="Save failed";if(!silent)showNotice("Changes Not Saved",e.message);}finally{saving=false;}};
  const wireEditor=()=>{const area=document.querySelector("#guide-content"),changed=()=>{dirty=true;document.querySelector("#save-status").textContent="Unsaved changes"},insert=html=>{document.execCommand("insertHTML",false,html);changed()};area.addEventListener("input",changed);document.querySelectorAll("[data-command]").forEach(button=>button.onclick=()=>{document.execCommand(button.dataset.command,false,null);area.focus();changed();});document.querySelector("#block-style").onchange=e=>{document.execCommand("formatBlock",false,e.target.value);changed()};document.querySelector("#font-name").onchange=e=>{document.execCommand("fontName",false,e.target.value);changed()};document.querySelector("#font-size").onchange=e=>{document.execCommand("fontSize",false,"7");area.querySelectorAll('font[size="7"]').forEach(node=>{node.removeAttribute("size");node.style.fontSize=`${e.target.value}px`});changed()};document.querySelector("#line-spacing").onchange=e=>{const selection=getSelection(),node=selection?.anchorNode?.nodeType===3?selection.anchorNode.parentElement:selection?.anchorNode;if(node&&area.contains(node)){(node.closest("p,div,li,blockquote,h1,h2,h3,h4,h5,h6")||node).style.lineHeight=e.target.value;changed()}};document.querySelector("#text-color").oninput=e=>{document.execCommand("foreColor",false,e.target.value);changed()};document.querySelector("#highlight-color").oninput=e=>{document.execCommand("hiliteColor",false,e.target.value);changed()};document.querySelector("#insert-link").onclick=async()=>{const url=await askText("Insert Link","URL");if(url){document.execCommand("createLink",false,url);changed()}};document.querySelector("#insert-image").onclick=async()=>{const url=await askText("Insert Image","Image URL");if(url){document.execCommand("insertImage",false,url);changed()}};document.querySelector("#insert-table").onclick=()=>insert("<table><tbody><tr><td>Cell</td><td>Cell</td></tr><tr><td>Cell</td><td>Cell</td></tr></tbody></table><p></p>");document.querySelector("#insert-checklist").onclick=()=>insert('<ul class="checklist"><li>Checklist item</li></ul><p></p>');document.querySelector("#insert-note").onclick=()=>insert('<aside class="guide-note"><b>Note</b><p>Add important information here.</p></aside><p></p>');document.querySelector("#insert-line").onclick=()=>{document.execCommand("insertHorizontalRule");changed()};document.querySelector("#insert-details").onclick=()=>insert("<details><summary>Section title</summary><p>Section content</p></details><p></p>");document.querySelector("#insert-header").onclick=()=>insert('<header class="document-header">Document header</header><p></p>');document.querySelector("#insert-footer").onclick=()=>insert('<footer class="document-footer">Document footer</footer><p></p>');document.querySelector("#clear-format").onclick=()=>{document.execCommand("removeFormat");changed()};document.querySelector("#save-guide").onclick=()=>save(false);document.querySelector("#discard-guide").onclick=()=>{showModal("Discard Changes","Discard all changes since the last save?",()=>{dirty=false;editing=false;render()})};clearInterval(autosave);autosave=setInterval(()=>save(true),60000);guardNavigation(()=>dirty,()=>{dirty=false;clearInterval(autosave)});window.onbeforeunload=()=>dirty?"You have unsaved guide changes.":undefined;area.focus();};render();}
-function inputFor(q, value = "") {
+// Guides v2: focused management and a dark, Planka-style document editor.
+async function guidesV2() {
+  const data = await request("/api/guides");
+  const folderList = () => data.folders.length
+    ? `<div id="guide-folder-list" class="guide-folder-grid">${data.folders.map((folder) => `<article class="guide-folder-card"><div class="folder-icon">▰</div><div><h2>${esc(folder.name)}</h2><p class="muted">${esc(folder.description || "No description provided.")}</p><span>${folder.documents.length} document${folder.documents.length === 1 ? "" : "s"}</span></div><div class="folder-actions"><a class="primary" href="/guides/${folder.id}">Open</a>${data.canCreateFolders ? `<button class="ghost edit-folder-v2" data-id="${folder.id}">Manage</button><button class="danger delete-folder-v2" data-id="${folder.id}" ${folder.documents.length ? `disabled title="Delete all ${folder.documents.length} documents first"` : ""}>Delete</button>` : ""}</div></article>`).join("")}</div>`
+    : '<div id="guide-folder-list" class="empty-state"><div class="empty-icon">!</div><p>No guide folders are currently available to you.</p></div>';
+  app.innerHTML = `<div class="section-head guide-heading"><div><div class="eyebrow">KNOWLEDGE LIBRARY</div><h1>Guides</h1><p class="muted">Browse internal CONJURES documentation available to your teams.</p></div>${data.canCreateFolders ? '<button class="primary" id="new-folder-v2">+ New Folder</button>' : ""}</div><div id="folder-editor-v2"></div>${folderList()}`;
+  const panel = document.querySelector("#folder-editor-v2");
+  const renderEditor = (folder = { name: "", description: "", permissions: {} }) => {
+    document.querySelector("#guide-folder-list")?.classList.add("hidden");
+    panel.innerHTML = `<section class="guide-admin-panel"><h2>${folder.id ? "Manage Folder" : "Create Folder"}</h2><div class="row"><label>Folder Name<input id="folder-name-v2" value="${esc(folder.name)}"></label><label>Description<input id="folder-description-v2" value="${esc(folder.description || "")}"></label></div><h3>Folder Permissions</h3><p class="muted">Administrators manage the entire folder. Other groups control document creation, deletion, content editing, and viewing.</p>${permissionEditor(GUIDE_FOLDER_KEYS, folder.permissions, data.roleOptions)}<div class="actions"><button class="ghost" id="cancel-folder-v2">Close</button><button class="primary" id="save-folder-v2">Save Folder</button></div></section>`;
+    panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.querySelector("#cancel-folder-v2").onclick = () => { panel.innerHTML = ""; document.querySelector("#guide-folder-list")?.classList.remove("hidden"); };
+    document.querySelector("#save-folder-v2").onclick = async () => {
+      try {
+        await request(folder.id ? `/api/guides/folders/${folder.id}` : "/api/guides/folders", { method: folder.id ? "PATCH" : "POST", body: JSON.stringify({ name: document.querySelector("#folder-name-v2").value, description: document.querySelector("#folder-description-v2").value, permissions: readPermissions(panel, GUIDE_FOLDER_KEYS) }) });
+        showNotice("Folder Saved", "The folder and its permissions have been saved.");
+        setTimeout(() => guidesV2(), 500);
+      } catch (error) { showNotice("Folder Not Saved", error.message); }
+    };
+  };
+  document.querySelector("#new-folder-v2")?.addEventListener("click", () => renderEditor());
+  document.querySelectorAll(".edit-folder-v2").forEach((button) => button.onclick = () => renderEditor(data.folders.find((folder) => folder.id === button.dataset.id)));
+  document.querySelectorAll(".delete-folder-v2").forEach((button) => button.onclick = async () => {
+    if (button.disabled) return;
+    const folder = data.folders.find((item) => item.id === button.dataset.id);
+    const typed = await askText("Delete Folder", `Type ${folder.name} to permanently delete this empty folder`);
+    if (typed !== folder.name) return showNotice("Folder Not Deleted", "The folder name did not match.");
+    try { await request(`/api/guides/folders/${folder.id}`, { method: "DELETE" }); await guidesV2(); } catch (error) { showNotice("Folder Not Deleted", error.message); }
+  });
+}
+
+async function guideFolderV2(folderId) {
+  const folder = await request(`/api/guides/folders/${folderId}`);
+  const cards = folder.documents.length ? `<div class="guide-document-list">${folder.documents.map((doc) => `<article class="${doc.pinned ? "is-pinned" : ""}"><div class="doc-mark">${doc.pinned ? "📌" : "≡"}</div><div><h3>${esc(doc.title)}</h3><p class="muted">${doc.pinned ? "Pinned · " : ""}Last Updated: ${dateOnly(doc.updated_at)}</p></div><div class="actions"><a class="primary" href="/guides/${folder.id}/${doc.id}">Open</a>${doc.abilities.admin ? `<button class="ghost pin-document-v2" data-id="${doc.id}" data-pinned="${Boolean(doc.pinned)}">${doc.pinned ? "Unpin" : "Pin"}</button><button class="ghost manage-document-v2" data-id="${doc.id}">Settings</button>` : ""}${doc.abilities.delete ? `<button class="danger delete-document-v2" data-id="${doc.id}">Delete</button>` : ""}</div></article>`).join("")}</div>` : '<div class="empty-state"><div class="empty-icon">!</div><p>No documents are currently available in this folder.</p></div>';
+  app.innerHTML = `<div class="guide-breadcrumb"><a href="/guides">Guides</a><span>›</span><b>${esc(folder.name)}</b></div><div class="section-head"><div><div class="eyebrow">GUIDE FOLDER</div><h1>${esc(folder.name)}</h1><p class="muted">${esc(folder.description || "")}</p></div>${folder.abilities.create ? '<button class="primary" id="new-document-v2">+ New Document</button>' : ""}</div><div id="document-editor-v2"></div><div id="guide-document-list">${cards}</div>`;
+  const panel = document.querySelector("#document-editor-v2");
+  const renderSettings = (doc = { title: "", permissions: {}, pinned: false }) => {
+    document.querySelector("#guide-document-list")?.classList.add("hidden");
+    panel.innerHTML = `<section class="guide-admin-panel"><h2>${doc.id ? "Document Settings" : "Create Document"}</h2><label>Document Title<input id="document-title-v2" value="${esc(doc.title)}"></label>${doc.id ? `<label class="pin-setting"><input type="checkbox" id="document-pinned-v2" ${doc.pinned ? "checked" : ""}> Pin this document to the top of the folder</label>` : ""}<h3>Document Permissions</h3><p class="muted">Administrators control settings and content. Editors change content. Viewers have read-only access.</p>${permissionEditor(GUIDE_DOCUMENT_KEYS, doc.permissions, folder.roleOptions)}<div class="actions"><button class="ghost" id="cancel-document-v2">Close</button><button class="primary" id="save-document-v2">${doc.id ? "Save Settings" : "Create Document"}</button></div></section>`;
+    document.querySelector("#cancel-document-v2").onclick = () => { panel.innerHTML = ""; document.querySelector("#guide-document-list")?.classList.remove("hidden"); };
+    document.querySelector("#save-document-v2").onclick = async () => {
+      try {
+        const body = { title: document.querySelector("#document-title-v2").value, permissions: readPermissions(panel, GUIDE_DOCUMENT_KEYS) };
+        if (doc.id) body.pinned = document.querySelector("#document-pinned-v2").checked;
+        await request(doc.id ? `/api/guides/folders/${folder.id}/documents/${doc.id}` : `/api/guides/folders/${folder.id}/documents`, { method: doc.id ? "PATCH" : "POST", body: JSON.stringify(body) });
+        showNotice(doc.id ? "Settings Saved" : "Document Created", doc.id ? "Document settings have been updated." : "The document is ready to edit.");
+        setTimeout(() => guideFolderV2(folder.id), 500);
+      } catch (error) { showNotice("Document Not Saved", error.message); }
+    };
+  };
+  document.querySelector("#new-document-v2")?.addEventListener("click", () => renderSettings());
+  document.querySelectorAll(".manage-document-v2").forEach((button) => button.onclick = () => renderSettings(folder.documents.find((doc) => doc.id === button.dataset.id)));
+  document.querySelectorAll(".pin-document-v2").forEach((button) => button.onclick = async () => { try { await request(`/api/guides/folders/${folder.id}/documents/${button.dataset.id}`, { method: "PATCH", body: JSON.stringify({ pinned: button.dataset.pinned !== "true" }) }); await guideFolderV2(folder.id); } catch (error) { showNotice("Pin Not Updated", error.message); } });
+  document.querySelectorAll(".delete-document-v2").forEach((button) => button.onclick = () => showModal("Delete Document", "This permanently deletes the document and cannot be undone. Continue?", async () => { try { await request(`/api/guides/folders/${folder.id}/documents/${button.dataset.id}`, { method: "DELETE" }); await guideFolderV2(folder.id); } catch (error) { showNotice("Document Not Deleted", error.message); } }));
+}
+
+function guideToolbarV2() {
+  return `<div class="guide-toolbar"><button data-command="undo" title="Undo">↶</button><button data-command="redo" title="Redo">↷</button><select id="block-style"><option value="p">Normal text</option>${[1,2,3,4,5,6].map((n) => `<option value="h${n}">Heading ${n}</option>`).join("")}<option value="blockquote">Quote</option></select><select id="font-name"><option>Inter</option><option>Arial</option><option>Georgia</option><option>Verdana</option><option>Courier New</option><option>Times New Roman</option></select><select id="font-size">${[10,12,14,16,18,20,24,28,32,40,48,60].map((n) => `<option value="${n}" ${n === 16 ? "selected" : ""}>${n}</option>`).join("")}</select><select id="line-spacing"><option value="1">1.0 spacing</option><option value="1.15">1.15 spacing</option><option value="1.5">1.5 spacing</option><option value="2">2.0 spacing</option></select><button data-command="bold"><b>B</b></button><button data-command="italic"><i>I</i></button><button data-command="underline"><u>U</u></button><button data-command="strikeThrough"><s>S</s></button><label class="color-tool">A<input type="color" id="text-color" value="#ffffff"></label><label class="color-tool">▰<input type="color" id="highlight-color" value="#ef4b5f"></label><button data-command="justifyLeft">≡</button><button data-command="justifyCenter">≡</button><button data-command="justifyRight">≡</button><button data-command="insertUnorderedList">•☰</button><button data-command="insertOrderedList">1☰</button><button data-command="outdent">⇤</button><button data-command="indent">⇥</button><button id="insert-link-v2">🔗</button><button id="upload-image-v2" title="Upload image">▧</button><input id="guide-image-input" class="hidden" type="file" accept="image/png,image/jpeg,image/webp,image/gif"><button id="insert-code-v2" title="Code block">&lt;/&gt;</button><button id="insert-table-v2">▦</button><button id="table-row-v2" title="Add table row">+R</button><button id="table-col-v2" title="Add table column">+C</button><button id="insert-checklist-v2">☑</button><select id="insert-note-v2" title="Note callout"><option value="">ⓘ Note</option><option value="red">Red note</option><option value="blue">Blue note</option><option value="green">Green note</option><option value="yellow">Yellow note</option></select><button id="insert-line-v2">—</button><button id="insert-details-v2">⌄</button><button data-command="removeFormat">Tx</button></div><div id="selection-toolbar" class="selection-toolbar hidden"><select id="selection-style"><option value="p">Text</option><option value="h1">Heading 1</option><option value="h2">Heading 2</option><option value="h3">Heading 3</option></select><button data-command="bold"><b>B</b></button><button data-command="italic"><i>I</i></button><button data-command="underline"><u>U</u></button><button data-command="strikeThrough"><s>S</s></button><button id="selection-code">&lt;/&gt;</button><label class="color-tool">A<input type="color" id="selection-color" value="#ffffff"></label><button id="selection-link">🔗</button></div>`;
+}
+
+function decorateCodeBlocks(area) {
+  area.querySelectorAll("pre").forEach((pre) => {
+    if (pre.querySelector(":scope > .code-copy")) return;
+    const button = document.createElement("button");
+    button.className = "code-copy";
+    button.type = "button";
+    button.contentEditable = "false";
+    button.textContent = "Copy";
+    button.onclick = async () => { await navigator.clipboard.writeText(pre.querySelector("code")?.innerText || [...pre.childNodes].filter((node) => node !== button).map((node) => node.textContent).join("")); button.textContent = "Copied"; setTimeout(() => button.textContent = "Copy", 1200); };
+    pre.prepend(button);
+  });
+}
+
+async function guideDocumentV2(folderId, docId) {
+  const doc = await request(`/api/guides/folders/${folderId}/documents/${docId}`);
+  let editing = false, dirty = false, saving = false, autosave = null, savedRange = null, lastSaved = doc.content_html || "<p><br></p>";
+  const captureRange = () => { const selection = getSelection(); if (selection?.rangeCount) savedRange = selection.getRangeAt(0).cloneRange(); };
+  const restoreRange = () => { if (!savedRange) return; const selection = getSelection(); selection.removeAllRanges(); selection.addRange(savedRange); };
+  const render = () => {
+    app.innerHTML = `<div class="guide-breadcrumb"><a href="/guides">Guides</a><span>›</span><a href="/guides/${doc.folder.id}">${esc(doc.folder.name)}</a><span>›</span><b>${esc(doc.title)}</b></div><article class="guide-document"><div class="guide-document-head"><div><div class="eyebrow">CONFIDENTIAL</div><h1>${esc(doc.title)}</h1><p class="muted">Last Updated: ${dateOnly(doc.updated_at)}</p></div>${doc.abilities.edit ? `<button class="primary" id="toggle-edit-v2">${editing ? "Editing" : "Edit"}</button>` : ""}</div>${editing ? guideToolbarV2() : ""}<div id="guide-content-v2" class="guide-content ${editing ? "is-editing" : ""}" ${editing ? 'contenteditable="true" spellcheck="true"' : ""}>${lastSaved}</div>${editing ? '<div class="guide-savebar"><span class="muted" id="save-status-v2">All changes saved</span><div class="actions"><button class="ghost" id="discard-guide-v2">Discard Changes</button><button class="primary" id="save-guide-v2">Save Changes</button></div></div>' : ""}</article>`;
+    const area = document.querySelector("#guide-content-v2");
+    decorateCodeBlocks(area);
+    document.querySelector("#toggle-edit-v2")?.addEventListener("click", () => { editing = true; render(); wire(); });
+  };
+  const cleanEditorHtml = () => { const clone = document.querySelector("#guide-content-v2").cloneNode(true); clone.querySelectorAll(".code-copy").forEach((button) => button.remove()); return clone.innerHTML; };
+  const save = async (silent = false) => {
+    if (!dirty || saving) return;
+    saving = true;
+    const status = document.querySelector("#save-status-v2");
+    if (status) status.textContent = "Saving…";
+    try { const result = await request(`/api/guides/folders/${folderId}/documents/${docId}`, { method: "PATCH", body: JSON.stringify({ contentHtml: cleanEditorHtml() }) }); lastSaved = result.content_html; doc.updated_at = result.updated_at; dirty = false; if (status) status.textContent = "Saved just now"; if (!silent) showNotice("Changes Saved", "Your guide changes have been saved."); }
+    catch (error) { if (status) status.textContent = "Save failed"; if (!silent) showNotice("Changes Not Saved", error.message); }
+    finally { saving = false; }
+  };
+  const wire = () => {
+    const area = document.querySelector("#guide-content-v2"), status = document.querySelector("#save-status-v2"), selectionToolbar = document.querySelector("#selection-toolbar");
+    const changed = () => { dirty = true; status.textContent = "Unsaved changes"; decorateCodeBlocks(area); };
+    const insert = (html) => { restoreRange(); document.execCommand("insertHTML", false, html); changed(); area.focus(); };
+    const fileToImage = (file) => { if (!file?.type.startsWith("image/")) return; if (file.size > 700 * 1024) return showNotice("Image Too Large", "Guide images must be 700 KB or smaller."); const reader = new FileReader(); reader.onload = () => insert(`<figure><img src="${reader.result}" alt="Uploaded guide image"><figcaption>Image caption</figcaption></figure><p><br></p>`); reader.readAsDataURL(file); };
+    area.addEventListener("input", changed);
+    area.addEventListener("mouseup", captureRange);
+    area.addEventListener("keyup", captureRange);
+    area.addEventListener("paste", (event) => { const image = [...(event.clipboardData?.items || [])].find((item) => item.type.startsWith("image/")); if (image) { event.preventDefault(); fileToImage(image.getAsFile()); } });
+    area.addEventListener("keydown", (event) => { if (event.key !== "Enter") return; const selection = getSelection(), node = selection?.anchorNode?.nodeType === 3 ? selection.anchorNode.parentElement : selection?.anchorNode, pre = node?.closest?.("pre"); if (pre && (pre.innerText.endsWith("\n") || !pre.innerText.trim())) { event.preventDefault(); const paragraph = document.createElement("p"); paragraph.innerHTML = "<br>"; pre.after(paragraph); const range = document.createRange(); range.selectNodeContents(paragraph); range.collapse(true); selection.removeAllRanges(); selection.addRange(range); changed(); } });
+    document.querySelectorAll("[data-command]").forEach((button) => button.onclick = () => { restoreRange(); document.execCommand(button.dataset.command, false, null); changed(); area.focus(); });
+    document.querySelector("#block-style").onchange = (event) => { restoreRange(); document.execCommand("formatBlock", false, event.target.value); changed(); };
+    document.querySelector("#font-name").onchange = (event) => { restoreRange(); document.execCommand("fontName", false, event.target.value); changed(); };
+    document.querySelector("#font-size").onchange = (event) => { restoreRange(); document.execCommand("fontSize", false, "7"); area.querySelectorAll('font[size="7"]').forEach((node) => { node.removeAttribute("size"); node.style.fontSize = `${event.target.value}px`; }); changed(); };
+    document.querySelector("#line-spacing").onchange = (event) => { restoreRange(); const selection = getSelection(), node = selection?.anchorNode?.nodeType === 3 ? selection.anchorNode.parentElement : selection?.anchorNode; if (node && area.contains(node)) (node.closest("p,div,li,blockquote,h1,h2,h3,h4,h5,h6") || node).style.lineHeight = event.target.value; changed(); };
+    document.querySelector("#text-color").oninput = (event) => { restoreRange(); document.execCommand("foreColor", false, event.target.value); changed(); };
+    document.querySelector("#highlight-color").oninput = (event) => { restoreRange(); document.execCommand("hiliteColor", false, event.target.value); changed(); };
+    const addLink = async () => { const url = await askText("Insert Link", "URL", "https://"); if (url) { restoreRange(); document.execCommand("createLink", false, url); changed(); area.focus(); } };
+    document.querySelector("#insert-link-v2").onclick = addLink;
+    document.querySelector("#selection-link").onclick = addLink;
+    document.querySelector("#upload-image-v2").onclick = () => document.querySelector("#guide-image-input").click();
+    document.querySelector("#guide-image-input").onchange = (event) => fileToImage(event.target.files[0]);
+    document.querySelector("#insert-code-v2").onclick = () => insert('<pre><code>Type or paste code here</code></pre><p><br></p>');
+    document.querySelector("#insert-table-v2").onclick = async () => { const rowCount = Math.min(12, Math.max(1, Number(await askText("Insert Table", "Number of rows", "2")) || 0)); if (!rowCount) return; const colCount = Math.min(8, Math.max(1, Number(await askText("Insert Table", "Number of columns", "2")) || 0)); if (!colCount) return; insert(`<div class="table-wrap"><table><tbody>${Array.from({ length: rowCount }, () => `<tr>${Array.from({ length: colCount }, () => "<td>Cell</td>").join("")}</tr>`).join("")}</tbody></table></div><p><br></p>`); };
+    const activeCell = () => { const selection = getSelection(), node = selection?.anchorNode?.nodeType === 3 ? selection.anchorNode.parentElement : selection?.anchorNode; return node?.closest?.("td,th"); };
+    document.querySelector("#table-row-v2").onclick = () => { const cell = activeCell(); if (!cell) return showNotice("Select a Table Cell", "Place your cursor inside a table first."); const row = cell.parentElement, clone = row.cloneNode(true); clone.querySelectorAll("td,th").forEach((item) => item.textContent = "Cell"); row.after(clone); changed(); };
+    document.querySelector("#table-col-v2").onclick = () => { const cell = activeCell(); if (!cell) return showNotice("Select a Table Cell", "Place your cursor inside a table first."); const index = [...cell.parentElement.children].indexOf(cell); cell.closest("table").querySelectorAll("tr").forEach((row) => { const next = document.createElement(row.children[index]?.tagName || "td"); next.textContent = "Cell"; (row.children[index] || row.lastElementChild).after(next); }); changed(); };
+    document.querySelector("#insert-checklist-v2").onclick = () => insert('<ul class="checklist"><li>Checklist item</li></ul><p><br></p>');
+    document.querySelector("#insert-note-v2").onchange = (event) => { if (!event.target.value) return; insert(`<aside class="guide-note note-${event.target.value}"><b>Note</b><p>Add important information here.</p></aside><p><br></p>`); event.target.value = ""; };
+    document.querySelector("#insert-line-v2").onclick = () => insert("<hr><p><br></p>");
+    document.querySelector("#insert-details-v2").onclick = () => insert("<details><summary>Section title</summary><p>Section content</p></details><p><br></p>");
+    document.querySelector("#selection-style").onchange = (event) => { restoreRange(); document.execCommand("formatBlock", false, event.target.value); changed(); };
+    document.querySelector("#selection-code").onclick = () => { restoreRange(); document.execCommand("formatBlock", false, "pre"); changed(); };
+    document.querySelector("#selection-color").oninput = (event) => { restoreRange(); document.execCommand("foreColor", false, event.target.value); changed(); };
+    document.addEventListener("selectionchange", () => { const selection = getSelection(); if (!selection?.rangeCount || selection.isCollapsed || !area.contains(selection.anchorNode)) return selectionToolbar.classList.add("hidden"); savedRange = selection.getRangeAt(0).cloneRange(); const rect = savedRange.getBoundingClientRect(), parent = document.querySelector(".guide-document").getBoundingClientRect(); selectionToolbar.style.left = `${Math.max(10, rect.left - parent.left)}px`; selectionToolbar.style.top = `${rect.bottom - parent.top + 8}px`; selectionToolbar.classList.remove("hidden"); });
+    document.querySelector("#save-guide-v2").onclick = () => save(false);
+    document.querySelector("#discard-guide-v2").onclick = () => showModal("Discard Changes", "Discard every change since the last save?", () => { dirty = false; editing = false; clearInterval(autosave); render(); });
+    clearInterval(autosave); autosave = setInterval(() => save(true), 60000);
+    guardNavigation(() => dirty, () => { dirty = false; clearInterval(autosave); });
+    window.onbeforeunload = () => dirty ? "You have unsaved guide changes." : undefined;
+    area.focus();
+  };
+  render();
+}
+
+ function inputFor(q, value = "") {
   if (q.locked) return `<input value="${esc(value)}" disabled>`;
   if (q.type === "long")
     return `<textarea data-q="${q.id}" ${q.required ? "required" : ""}>${esc(value)}</textarea>`;
@@ -838,7 +978,7 @@ async function route() {
     if (p === "/dashboard") return dashboard();
     if (p === "/applications") return applications();
     if (p === "/customroles") return customRoles();
-    if (p === "/guides") {if(!me.authenticated){app.innerHTML='<div class="success"><h1>Guides</h1><p class="muted">Please log in with your verified CONJURES account to access Guides.</p><a class="primary" href="/">Log In</a></div>';return;}return guides();}
+    if (p === "/guides") {if(!me.authenticated){app.innerHTML='<div class="success"><h1>Guides</h1><p class="muted">Please log in with your verified CONJURES account to access Guides.</p><a class="primary" href="/">Log In</a></div>';return;}return guidesV2();}
     if (p === "/exams") return exams();
     if (p === "/terms" || p === "/privacy") return legal(p.slice(1));
     const m = p.match(/^\/applications\/([^/]+)(\/edit)?$/);
@@ -846,7 +986,7 @@ async function route() {
     const e = p.match(/^\/exams\/([^/]+)(\/edit)?$/);
     if (e) return e[2] ? examEditPage(e[1]) : examPage(e[1]);
     const g = p.match(/^\/guides\/([^/]+)(?:\/([^/]+))?$/);
-    if(g){if(!me.authenticated){app.innerHTML='<div class="success"><h1>Guides</h1><p class="muted">Please log in with your verified CONJURES account to access Guides.</p><a class="primary" href="/">Log In</a></div>';return;}return g[2]?guideDocument(g[1],g[2]):guideFolder(g[1]);}
+    if(g){if(!me.authenticated){app.innerHTML='<div class="success"><h1>Guides</h1><p class="muted">Please log in with your verified CONJURES account to access Guides.</p><a class="primary" href="/">Log In</a></div>';return;}return g[2]?guideDocumentV2(g[1],g[2]):guideFolderV2(g[1]);}
     return applications();
   } catch (e) {
     app.innerHTML = `<div class="success"><h1>Something went wrong</h1><p class="muted">${esc(e.message)}</p></div>`;
