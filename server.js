@@ -9,7 +9,10 @@ const PUBLIC_URL = String(
 const API_URL = String(
   process.env.CONJURES_API_URL || "https://api.conjures.net",
 ).replace(/\/$/, "");
-const GUILD_ID = process.env.DISCORD_GUILD_ID || "1517112878862176256";
+// Site permissions are always sourced from the CONJURES guild. Do not allow a
+// shared/departments deployment variable to silently point authorization at a
+// different server.
+const GUILD_ID = "1517112878862176256";
 const GROUP_ID = process.env.ROBLOX_GROUP_ID || "12287375";
 const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID || "BAA1j7yq_OhzZfTA4ncLzXBRJ8kZvEa03J2SIU81G0qghzdcGc_BATtDTbDSJUu4WRfykOZdIIboPGPq1o";
 const PAYPAL_BASE = process.env.PAYPAL_ENVIRONMENT === "sandbox" ? "https://api-m.sandbox.paypal.com" : "https://api-m.paypal.com";
@@ -343,13 +346,17 @@ async function headshot(userId) {
   }
 }
 async function enrich(row) {
-  const [member, roles, rank] = await Promise.all([
+  const [member, roles, rank, snapshots] = await Promise.all([
     discord(`/guilds/${GUILD_ID}/members/${row.discord_id}`).catch(() => null),
     discord(`/guilds/${GUILD_ID}/roles`).catch(() => []),
     rankFor(row.roblox_user_id),
+    api(`/tables/discord_member_roles?id=${encodeURIComponent(`${GUILD_ID}:${row.discord_id}`)}&limit=1`).catch(() => []),
   ]);
+  let snapshotRoleIds=[];
+  try{snapshotRoleIds=JSON.parse(snapshots?.[0]?.role_ids_json||"[]");}catch{}
+  const roleIds=[...new Set([...(member?.roles||[]),...snapshotRoleIds.map(String)])];
   const names = new Set(
-    (member?.roles || [])
+    roleIds
       .map((roleId) => roles.find((r) => r.id === roleId)?.name)
       .filter(Boolean),
   );
@@ -360,7 +367,7 @@ async function enrich(row) {
     avatar: member?.user?.avatar,
     headshot: await headshot(row.roblox_user_id),
     roles: [...names],
-    roleIds: member?.roles || [],
+    roleIds,
     rank,
   };
 }
