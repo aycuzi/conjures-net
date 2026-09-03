@@ -1,6 +1,7 @@
 const express = require("express");
 const crypto = require("crypto");
 const path = require("path");
+const discordOauth = require("./discord-oauth").createDiscordOauth();
 
 const app = express();
 const PUBLIC_URL = String(
@@ -1439,18 +1440,14 @@ app.get("/auth/discord/callback", async (req, res) => {
       code: String(req.query.code),
       redirect_uri: redirect,
     });
-    const tr = await fetch("https://discord.com/api/v10/oauth2/token", {
+    const access = await discordOauth.request("/oauth2/token", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body,
     });
-    if (!tr.ok) throw new Error(`discord token exchange failed (${tr.status})`);
-    const access = await tr.json();
-    const ur = await fetch("https://discord.com/api/v10/users/@me", {
+    const du = await discordOauth.request("/users/@me", {
       headers: { authorization: `Bearer ${access.access_token}` },
     });
-    if (!ur.ok) throw new Error(`discord profile lookup failed (${ur.status})`);
-    const du = await ur.json();
     const row = await verification({ discord_id: du.id });
     if (!row) return res.redirect("/?error=verification_required");
     const blocked = await api(
@@ -1463,7 +1460,7 @@ app.get("/auth/discord/callback", async (req, res) => {
     });
   } catch (error) {
     console.warn("[oauth] Discord login failed -", error.message);
-    res.redirect("/?error=login_failed");
+    res.redirect(error.code === "DISCORD_OAUTH_RATE_LIMITED" ? "/?error=discord_rate_limited" : "/?error=login_failed");
   }
 });
 app.get("/auth/roblox", (req, res) => {
